@@ -2,7 +2,7 @@ const express = require("express");
 const cron = require("node-cron");
 const path = require("path");
 const { fetchAll } = require("./fetcher");
-const { getArticles, getCategories, getStats } = require("./db");
+const { getArticles, getCategories, getStats, getTrending, getRelated } = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +37,27 @@ app.get("/api/categories", (req, res) => {
 // GET /api/stats
 app.get("/api/stats", (req, res) => {
   res.json(getStats());
+});
+
+// GET /api/trending?hours=24
+app.get("/api/trending", (req, res) => {
+  const hours = Math.min(parseInt(req.query.hours) || 24, 168);
+  try {
+    res.json(getTrending(hours));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/articles/:id/related
+app.get("/api/articles/:id/related", (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    res.json(getRelated(id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/fetch  – trigger manual fetch

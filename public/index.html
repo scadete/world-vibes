@@ -277,6 +277,76 @@
       z-index: 200;
     }
     #toast.show { opacity: 1; }
+
+    /* ── Trending ── */
+    .trending-section {
+      margin-bottom: 1.25rem;
+    }
+    .trending-label {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      margin-bottom: 0.5rem;
+    }
+    .trending-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .trending-tag {
+      background: #a78bfa18;
+      border: 1px solid #a78bfa44;
+      color: var(--accent2);
+      padding: 0.2rem 0.65rem;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      font-family: var(--font);
+    }
+    .trending-tag:hover { background: #a78bfa33; color: #c4b5fd; }
+
+    /* ── Related ── */
+    .card-related-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      cursor: pointer;
+      padding: 0;
+      text-align: left;
+      font-family: var(--font);
+    }
+    .card-related-btn:hover { color: var(--accent); }
+
+    .related-panel { margin-top: 0.25rem; }
+    .related-panel-inner {
+      border-top: 1px solid var(--border);
+      padding-top: 0.5rem;
+      margin-top: 0.25rem;
+    }
+    .related-panel-title {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+    .related-item {
+      padding: 0.3rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .related-item:last-child { border-bottom: none; }
+    .related-item a {
+      color: var(--text);
+      text-decoration: none;
+      font-size: 0.83rem;
+      line-height: 1.35;
+      display: block;
+    }
+    .related-item a:hover { color: var(--accent); }
+    .related-item .related-meta {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 0.1rem;
+    }
   </style>
 </head>
 <body>
@@ -297,6 +367,12 @@
 
   <!-- Stats -->
   <div class="stats-bar" id="statsBar">Loading stats…</div>
+
+  <!-- Trending Topics -->
+  <div class="trending-section" id="trendingSection" style="display:none">
+    <div class="trending-label">🔥 Em Alta (últimas 24h)</div>
+    <div class="trending-tags" id="trendingTags"></div>
+  </div>
 
   <!-- Filters -->
   <div class="toolbar" id="langToolbar">
@@ -401,8 +477,46 @@
       <div class="card-title"><a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></div>
       ${a.description ? `<div class="card-desc">${escHtml(a.description)}</div>` : ''}
       <div class="card-feed">📰 ${escHtml(a.feed_name)}${a.author ? ' · ' + escHtml(a.author) : ''}</div>
+      <button class="card-related-btn">🔗 Ver relacionados</button>
+      <div class="related-panel"></div>
     `;
+    const btn = div.querySelector('.card-related-btn');
+    const panel = div.querySelector('.related-panel');
+    btn.addEventListener('click', () => toggleRelated(a.id, btn, panel));
     return div;
+  }
+
+  // ── Related articles ────────────────────────────────────────────────────────
+  async function toggleRelated(articleId, btn, panel) {
+    if (panel.children.length > 0) {
+      panel.innerHTML = '';
+      btn.textContent = '🔗 Ver relacionados';
+      return;
+    }
+    btn.textContent = 'Carregando…';
+    try {
+      const related = await (await fetch(`/api/articles/${articleId}/related`)).json();
+      const inner = document.createElement('div');
+      inner.className = 'related-panel-inner';
+      if (!related.length) {
+        inner.innerHTML = '<div class="related-panel-title">Nenhum artigo relacionado encontrado.</div>';
+      } else {
+        inner.innerHTML = '<div class="related-panel-title">Artigos relacionados</div>';
+        related.forEach(a => {
+          const item = document.createElement('div');
+          item.className = 'related-item';
+          item.innerHTML = `
+            <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
+            <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
+          `;
+          inner.appendChild(item);
+        });
+      }
+      panel.appendChild(inner);
+      btn.textContent = '✕ Fechar';
+    } catch {
+      btn.textContent = '🔗 Ver relacionados';
+    }
   }
 
   function loadMore() {
@@ -458,6 +572,30 @@
     } catch (e) { /* ignore */ }
   }
 
+  // ── Trending topics ─────────────────────────────────────────────────────────
+  async function loadTrending() {
+    try {
+      const data = await (await fetch('/api/trending')).json();
+      if (!data.length) return;
+      const section = document.getElementById('trendingSection');
+      const container = document.getElementById('trendingTags');
+      container.innerHTML = '';
+      data.forEach(({ term, count }) => {
+        const tag = document.createElement('button');
+        tag.className = 'trending-tag';
+        tag.textContent = `${term} · ${count}`;
+        tag.title = `${count} menções nas últimas 24h`;
+        tag.addEventListener('click', () => {
+          document.getElementById('searchInput').value = term;
+          state.search = term;
+          loadArticles();
+        });
+        container.appendChild(tag);
+      });
+      section.style.display = 'block';
+    } catch (e) { /* ignore */ }
+  }
+
   // ── Manual fetch ───────────────────────────────────────────────────────────
   async function triggerFetch() {
     const btn = document.getElementById('fetchBtn');
@@ -467,7 +605,7 @@
     try {
       await fetch('/api/fetch', { method: 'POST' });
       setTimeout(async () => {
-        await Promise.all([loadStats(), loadArticles()]);
+        await Promise.all([loadStats(), loadArticles(), loadTrending()]);
         toast('✓ Feeds refreshed!');
         btn.disabled = false;
         btn.textContent = '↻ Refresh feeds';
@@ -481,7 +619,7 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   (async () => {
-    await Promise.all([loadCategories(), loadStats()]);
+    await Promise.all([loadCategories(), loadStats(), loadTrending()]);
     await loadArticles();
   })();
 </script>
