@@ -42,6 +42,22 @@ db.exec(`
     INSERT INTO articles_fts(rowid, title, description, content)
     VALUES (new.id, COALESCE(new.title,''), COALESCE(new.description,''), COALESCE(new.content,''));
   END;
+
+  CREATE TABLE IF NOT EXISTS clusters (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    article_count INTEGER NOT NULL DEFAULT 1,
+    source_count  INTEGER NOT NULL DEFAULT 1,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Add cluster_id column to articles if not yet present (idempotent migration)
+try {
+  db.exec("ALTER TABLE articles ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)");
+} catch { /* column already exists */ }
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_articles_cluster_id ON articles(cluster_id);
 `);
 
 const insertArticle = db.prepare(`
@@ -51,93 +67,7 @@ const insertArticle = db.prepare(`
     (@guid, @title, @link, @description, @content, @pub_date, @author, @feed_name, @category, @language)
 `);
 
-function saveArticles(articles) {
-  const insertMany = db.transaction((items) => {
-    let count = 0;
-    for (const item of items) {
-      const info = insertArticle.run(item);
-      count += info.changes;
-    }
-    return count;
-  });
-  return insertMany(articles);
-}
-
-// Sanitize user input for FTS5 MATCH queries
-function toFTSQuery(q) {
-  return q
-    .replace(/[^\w\s]/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" AND ");
-}
-
-function getArticles({ category, language, search, limit = 50, offset = 0 } = {}) {
-  const params = [];
-
-  if (search) {
-    const ftsQuery = toFTSQuery(search);
-    if (!ftsQuery) return [];
-
-    let query = `
-      SELECT a.* FROM articles a
-      JOIN articles_fts ON a.id = articles_fts.rowid
-      WHERE articles_fts MATCH ?
-    `;
-    params.push(ftsQuery);
-
-    if (category && category !== "all") {
-      query += " AND a.category = ?";
-      params.push(category);
-    }
-    if (language && language !== "all") {
-      query += " AND a.language = ?";
-      params.push(language);
-    }
-
-    query += " ORDER BY bm25(articles_fts), a.pub_date DESC LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-
-    try {
-      return db.prepare(query).all(...params);
-    } catch {
-      return [];
-    }
-  }
-
-  // No search — use regular indexed query
-  let query = "SELECT * FROM articles WHERE 1=1";
-
-  if (category && category !== "all") {
-    query += " AND category = ?";
-    params.push(category);
-  }
-  if (language && language !== "all") {
-    query += " AND language = ?";
-    params.push(language);
-  }
-
-  query += " ORDER BY pub_date DESC, fetched_at DESC LIMIT ? OFFSET ?";
-  params.push(limit, offset);
-
-  return db.prepare(query).all(...params);
-}
-
-function getCategories() {
-  return db.prepare("SELECT DISTINCT category FROM articles ORDER BY category").all().map((r) => r.category);
-}
-
-function getStats() {
-  return {
-    total: db.prepare("SELECT COUNT(*) as c FROM articles").get().c,
-    byCategory: db.prepare("SELECT category, COUNT(*) as count FROM articles GROUP BY category ORDER BY count DESC").all(),
-    byLanguage: db.prepare("SELECT language, COUNT(*) as count FROM articles GROUP BY language ORDER BY count DESC").all(),
-    lastFetch: db.prepare("SELECT MAX(fetched_at) as last FROM articles").get().last,
-  };
-}
-
-// ── Trending keywords ────────────────────────────────────────────────────────
+// ── Stopwords ─────────────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
   // English
@@ -156,6 +86,215 @@ const STOPWORDS = new Set([
   "todo","toda","ellos","ellas","después","antes","sobre","también","puede",
   "están","tiene","tienen","según","través","contra","durante","mismo","hace",
 ]);
+
+// ── Story clustering ──────────────────────────────────────────────────────────
+
+const stmtGetArticleForCluster = db.prepare(
+  "SELECT id, title, language, feed_name, cluster_id FROM articles WHERE id = ?"
+);
+const stmtFindClusterMatch = db.prepare(`
+  SELECT a.id, a.cluster_id FROM articles a
+  JOIN articles_fts ON a.id = articles_fts.rowid
+  WHERE articles_fts MATCH ?
+    AND a.id != ?
+    AND a.language = ?
+    AND a.feed_name != ?
+    AND a.pub_date >= datetime('now', '-48 hours')
+  ORDER BY bm25(articles_fts)
+  LIMIT 1
+`);
+const stmtSetCluster   = db.prepare("UPDATE articles SET cluster_id = ? WHERE id = ?");
+const stmtInsertCluster = db.prepare(
+  "INSERT INTO clusters (article_count, source_count) VALUES (?, ?)"
+);
+const stmtRecalcCluster = db.prepare(`
+  UPDATE clusters SET
+    article_count = (SELECT COUNT(*)               FROM articles WHERE cluster_id = ?),
+    source_count  = (SELECT COUNT(DISTINCT feed_name) FROM articles WHERE cluster_id = ?),
+    updated_at    = datetime('now')
+  WHERE id = ?
+`);
+
+function clusterArticle(articleId) {
+  const article = stmtGetArticleForCluster.get(articleId);
+  if (!article) return;
+
+  // Extract top-3 significant keywords from the title for strict AND matching
+  const keywords = article.title
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 4 && !STOPWORDS.has(w.toLowerCase()) && !/^\d+$/.test(w))
+    .slice(0, 3)
+    .map(w => `"${w}"`);
+
+  if (keywords.length < 2) return; // not enough signal
+
+  let match;
+  try {
+    match = stmtFindClusterMatch.get(
+      keywords.join(" AND "),
+      articleId,
+      article.language,
+      article.feed_name
+    );
+  } catch {
+    return; // FTS query error (e.g. special chars) — skip clustering
+  }
+
+  if (!match) return;
+
+  if (match.cluster_id) {
+    // Join the existing cluster
+    stmtSetCluster.run(match.cluster_id, articleId);
+    stmtRecalcCluster.run(match.cluster_id, match.cluster_id, match.cluster_id);
+  } else {
+    // Create a new cluster for both articles
+    const cid = stmtInsertCluster.run(2, 2).lastInsertRowid;
+    stmtSetCluster.run(cid, articleId);
+    stmtSetCluster.run(cid, match.id);
+    stmtRecalcCluster.run(cid, cid, cid);
+  }
+}
+
+// ── Save articles ─────────────────────────────────────────────────────────────
+
+function saveArticles(articles) {
+  const newIds = [];
+  const insertMany = db.transaction((items) => {
+    for (const item of items) {
+      const info = insertArticle.run(item);
+      if (info.changes > 0) newIds.push(info.lastInsertRowid);
+    }
+    return newIds.length;
+  });
+  const count = insertMany(articles);
+  // Run clustering outside transaction (FTS reads can't be inside a write tx)
+  for (const id of newIds) clusterArticle(id);
+  return count;
+}
+
+// ── FTS query sanitizer ───────────────────────────────────────────────────────
+
+function toFTSQuery(q) {
+  return q
+    .replace(/[^\w\s]/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" AND ");
+}
+
+// ── Get articles ──────────────────────────────────────────────────────────────
+
+function getArticles({ category, language, search, sort, limit = 50, offset = 0 } = {}) {
+  const params = [];
+  const byRelevance = sort === "relevance";
+
+  if (search) {
+    const ftsQuery = toFTSQuery(search);
+    if (!ftsQuery) return [];
+
+    let query = `
+      SELECT a.*, COALESCE(c.source_count, 1) AS source_count
+      FROM articles a
+      JOIN articles_fts ON a.id = articles_fts.rowid
+      LEFT JOIN clusters c ON a.cluster_id = c.id
+      WHERE articles_fts MATCH ?
+    `;
+    params.push(ftsQuery);
+
+    if (category && category !== "all") {
+      query += " AND a.category = ?";
+      params.push(category);
+    }
+    if (language && language !== "all") {
+      query += " AND a.language = ?";
+      params.push(language);
+    }
+
+    query += byRelevance
+      ? " ORDER BY COALESCE(c.source_count, 1) DESC, bm25(articles_fts), a.pub_date DESC"
+      : " ORDER BY bm25(articles_fts), a.pub_date DESC";
+    query += " LIMIT ? OFFSET ?";
+    params.push(limit, offset);
+
+    try {
+      return db.prepare(query).all(...params);
+    } catch {
+      return [];
+    }
+  }
+
+  // No search — use regular indexed query
+  let query = `
+    SELECT a.*, COALESCE(c.source_count, 1) AS source_count
+    FROM articles a
+    LEFT JOIN clusters c ON a.cluster_id = c.id
+    WHERE 1=1
+  `;
+
+  if (category && category !== "all") {
+    query += " AND a.category = ?";
+    params.push(category);
+  }
+  if (language && language !== "all") {
+    query += " AND a.language = ?";
+    params.push(language);
+  }
+
+  query += byRelevance
+    ? " ORDER BY COALESCE(c.source_count, 1) DESC, a.pub_date DESC, a.fetched_at DESC"
+    : " ORDER BY a.pub_date DESC, a.fetched_at DESC";
+  query += " LIMIT ? OFFSET ?";
+  params.push(limit, offset);
+
+  return db.prepare(query).all(...params);
+}
+
+// ── Top story clusters ────────────────────────────────────────────────────────
+
+function getTopClusters(limit = 20) {
+  return db.prepare(`
+    SELECT
+      c.id,
+      c.source_count,
+      c.article_count,
+      c.updated_at,
+      GROUP_CONCAT(DISTINCT a.feed_name) AS sources,
+      (SELECT title FROM articles WHERE cluster_id = c.id ORDER BY pub_date DESC LIMIT 1) AS sample_title,
+      (SELECT link  FROM articles WHERE cluster_id = c.id ORDER BY pub_date DESC LIMIT 1) AS sample_link
+    FROM clusters c
+    JOIN articles a ON a.cluster_id = c.id
+    WHERE c.source_count >= 2
+    GROUP BY c.id
+    ORDER BY c.source_count DESC, c.updated_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+// ── Categories / Stats ────────────────────────────────────────────────────────
+
+function getCategories() {
+  return db.prepare("SELECT DISTINCT category FROM articles ORDER BY category").all().map((r) => r.category);
+}
+
+function getStats() {
+  const clusterStats = db.prepare(
+    "SELECT COUNT(*) as total, SUM(CASE WHEN source_count >= 2 THEN 1 ELSE 0 END) as multi FROM clusters"
+  ).get();
+  return {
+    total: db.prepare("SELECT COUNT(*) as c FROM articles").get().c,
+    byCategory: db.prepare("SELECT category, COUNT(*) as count FROM articles GROUP BY category ORDER BY count DESC").all(),
+    byLanguage: db.prepare("SELECT language, COUNT(*) as count FROM articles GROUP BY language ORDER BY count DESC").all(),
+    lastFetch: db.prepare("SELECT MAX(fetched_at) as last FROM articles").get().last,
+    clusters: {
+      total: clusterStats.total || 0,
+      multiSource: clusterStats.multi || 0,
+    },
+  };
+}
+
+// ── Trending keywords ─────────────────────────────────────────────────────────
 
 function getTrending(hours = 24, topN = 20) {
   const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
@@ -183,13 +322,12 @@ function getTrending(hours = 24, topN = 20) {
     .map(([term, count]) => ({ term, count }));
 }
 
-// ── Related articles ─────────────────────────────────────────────────────────
+// ── Related articles ──────────────────────────────────────────────────────────
 
 function getRelated(articleId, limit = 5) {
   const article = db.prepare("SELECT id, title, description, category, language FROM articles WHERE id = ?").get(articleId);
   if (!article) return [];
 
-  // Extract keywords from title + description for richer context
   const text = `${article.title} ${article.description || ""}`;
   const seen = new Set();
   const keywords = [];
@@ -208,7 +346,6 @@ function getRelated(articleId, limit = 5) {
   const orQuery  = keywords.join(" OR ");
 
   try {
-    // First pass: strict AND match + same language
     const results = db.prepare(`
       SELECT a.* FROM articles a
       JOIN articles_fts ON a.id = articles_fts.rowid
@@ -221,7 +358,6 @@ function getRelated(articleId, limit = 5) {
 
     if (results.length >= limit) return results;
 
-    // Second pass: OR match, same language + category, excluding already found
     const excludeIds = [articleId, ...results.map((r) => r.id)];
     const placeholders = excludeIds.map(() => "?").join(",");
     const extra = db.prepare(`
@@ -241,4 +377,12 @@ function getRelated(articleId, limit = 5) {
   }
 }
 
-module.exports = { saveArticles, getArticles, getCategories, getStats, getTrending, getRelated };
+module.exports = {
+  saveArticles,
+  getArticles,
+  getCategories,
+  getStats,
+  getTrending,
+  getRelated,
+  getTopClusters,
+};

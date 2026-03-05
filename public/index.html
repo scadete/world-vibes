@@ -305,6 +305,59 @@
     }
     .trending-tag:hover { background: #a78bfa33; color: #c4b5fd; }
 
+    /* ── Cluster badge ── */
+    .cluster-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 99px;
+      background: #f59e0b22;
+      color: #fbbf24;
+      border: 1px solid #f59e0b55;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+
+    /* ── Highlights section ── */
+    .highlights-section {
+      margin-bottom: 1.25rem;
+    }
+    .highlights-label {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      margin-bottom: 0.5rem;
+    }
+    .highlights-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .highlight-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.55rem 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .highlight-item:hover { border-color: var(--accent); }
+    .highlight-item .cluster-badge { flex-shrink: 0; }
+    .highlight-item-title {
+      font-size: 0.85rem;
+      color: var(--text);
+      line-height: 1.35;
+    }
+    .highlight-item-sources {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 0.1rem;
+    }
+
     /* ── Related ── */
     .card-related-btn {
       background: none;
@@ -374,6 +427,19 @@
     <div class="trending-tags" id="trendingTags"></div>
   </div>
 
+  <!-- Histórias em Destaque (multi-source clusters) -->
+  <div class="highlights-section" id="highlightsSection" style="display:none">
+    <div class="highlights-label">📡 Histórias em Destaque — cobertura por múltiplos veículos</div>
+    <div class="highlights-list" id="highlightsList"></div>
+  </div>
+
+  <!-- Sort -->
+  <div class="toolbar" id="sortToolbar">
+    <span class="toolbar-label">Ordenar:</span>
+    <button class="btn active" onclick="setSort('latest', this)">Mais recentes</button>
+    <button class="btn" onclick="setSort('relevance', this)">Por relevância</button>
+  </div>
+
   <!-- Filters -->
   <div class="toolbar" id="langToolbar">
     <span class="toolbar-label">Language:</span>
@@ -399,7 +465,7 @@
 
 <script>
   const PAGE_SIZE = 48;
-  let state = { category: 'all', language: 'all', search: '', offset: 0, loading: false };
+  let state = { category: 'all', language: 'all', search: '', sort: 'latest', offset: 0, loading: false };
 
   // ── Utils ──────────────────────────────────────────────────────────────────
   function toast(msg, duration = 3000) {
@@ -443,6 +509,7 @@
       offset:   state.offset,
     });
     if (state.search) params.set('search', state.search);
+    if (state.sort === 'relevance') params.set('sort', 'relevance');
 
     try {
       const res = await fetch(`/api/articles?${params}`);
@@ -472,6 +539,7 @@
     div.innerHTML = `
       <div class="card-meta">
         <span class="badge">${escHtml(a.category)}</span>
+        ${a.source_count >= 2 ? `<span class="cluster-badge">📡 ${a.source_count} fontes</span>` : ''}
         <span class="date">${relativeTime(a.pub_date)}</span>
       </div>
       <div class="card-title"><a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></div>
@@ -533,6 +601,14 @@
     loadArticles();
   }
 
+  function setSort(val, btn) {
+    state.sort = val;
+    const group = btn.parentElement.querySelectorAll('.btn');
+    group.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadArticles();
+  }
+
   function applySearch() {
     state.search = document.getElementById('searchInput').value.trim();
     loadArticles();
@@ -567,8 +643,43 @@
         <div>📋 <strong>${s.total.toLocaleString()}</strong> articles</div>
         <div>📂 <strong>${s.byCategory.length}</strong> categories</div>
         <div>🌐 <strong>${s.byLanguage.map(l=>`${l.language.toUpperCase()} ${l.count}`).join(' · ')}</strong></div>
+        ${s.clusters && s.clusters.multiSource > 0 ? `<div>📡 <strong>${s.clusters.multiSource}</strong> histórias com múltiplas fontes</div>` : ''}
         <div>🕐 Last fetch: <strong>${last}</strong></div>
       `;
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Histórias em Destaque (clusters) ────────────────────────────────────────
+  async function loadClusters() {
+    try {
+      const data = await (await fetch('/api/clusters?limit=6')).json();
+      if (!data.length) return;
+      const section = document.getElementById('highlightsSection');
+      const list = document.getElementById('highlightsList');
+      list.innerHTML = '';
+      data.forEach(cluster => {
+        const item = document.createElement('div');
+        item.className = 'highlight-item';
+        const sources = cluster.sources ? cluster.sources.split(',').join(' · ') : '';
+        item.innerHTML = `
+          <span class="cluster-badge">📡 ${cluster.source_count} fontes</span>
+          <div>
+            <div class="highlight-item-title">${escHtml(cluster.sample_title || '')}</div>
+            ${sources ? `<div class="highlight-item-sources">${escHtml(sources)}</div>` : ''}
+          </div>
+        `;
+        if (cluster.sample_title) {
+          item.addEventListener('click', () => {
+            // Extract first few words as search query
+            const q = (cluster.sample_title || '').split(/\s+/).slice(0, 4).join(' ');
+            document.getElementById('searchInput').value = q;
+            state.search = q;
+            loadArticles();
+          });
+        }
+        list.appendChild(item);
+      });
+      section.style.display = 'block';
     } catch (e) { /* ignore */ }
   }
 
@@ -605,7 +716,7 @@
     try {
       await fetch('/api/fetch', { method: 'POST' });
       setTimeout(async () => {
-        await Promise.all([loadStats(), loadArticles(), loadTrending()]);
+        await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters()]);
         toast('✓ Feeds refreshed!');
         btn.disabled = false;
         btn.textContent = '↻ Refresh feeds';
@@ -619,7 +730,7 @@
 
   // ── Init ───────────────────────────────────────────────────────────────────
   (async () => {
-    await Promise.all([loadCategories(), loadStats(), loadTrending()]);
+    await Promise.all([loadCategories(), loadStats(), loadTrending(), loadClusters()]);
     await loadArticles();
   })();
 </script>
