@@ -1,0 +1,23 @@
+{
+  "name": "world-vibes",
+  "version": "1.0.0",
+  "description": "RSS News Aggregator - Stay updated with world news",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "fetch": "node src/fetcher.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "rss-parser": "^3.13.0",
+    "node-cron": "^3.0.3",
+    "better-sqlite3": "^9.4.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

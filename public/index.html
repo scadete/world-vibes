@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WorldVibes – RSS News Aggregator</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --accent: #6c8ef7;
+      --accent2: #a78bfa;
+      --text: #e2e8f0;
+      --text-muted: #8892a4;
+      --danger: #f87171;
+      --success: #34d399;
+      --radius: 10px;
+      --font: 'Segoe UI', system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .brand span { color: var(--text); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    /* ── Search ── */
+    .search-box {
+      display: flex;
+      align-items: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .search-box input {
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      width: 220px;
+    }
+    .search-box input::placeholder { color: var(--text-muted); }
+    .search-box button {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .search-box button:hover { background: var(--accent2); }
+
+    /* ── Buttons ── */
+    button.btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.45rem 0.9rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.85rem;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button.btn:hover { border-color: var(--accent); color: var(--accent); }
+    button.btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.btn-fetch {
+      background: #22c55e22;
+      border-color: #22c55e55;
+      color: var(--success);
+    }
+    button.btn-fetch:hover { background: #22c55e44; }
+    button.btn-fetch:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Layout ── */
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+      align-items: center;
+    }
+
+    .toolbar-label {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      margin-right: 0.25rem;
+    }
+
+    /* ── Stats bar ── */
+    .stats-bar {
+      display: flex;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1.25rem;
+      margin-bottom: 1.25rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .stat strong { color: var(--text); }
+
+    /* ── Article grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      transition: border-color 0.15s, transform 0.1s;
+    }
+    .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 99px;
+      background: #6c8ef722;
+      color: var(--accent);
+      border: 1px solid #6c8ef744;
+      white-space: nowrap;
+    }
+
+    .date {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .card-title {
+      font-size: 0.97rem;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .card-title a {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .card-title a:hover { color: var(--accent); }
+
+    .card-desc {
+      font-size: 0.83rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .card-feed {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: auto;
+    }
+
+    /* ── Loading / empty ── */
+    .spinner {
+      text-align: center;
+      padding: 4rem;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+    }
+    .spinner::after {
+      content: '';
+      display: inline-block;
+      width: 1.5rem;
+      height: 1.5rem;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-left: 0.75rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty {
+      text-align: center;
+      padding: 4rem;
+      color: var(--text-muted);
+    }
+    .empty h2 { margin-bottom: 0.5rem; font-size: 1.1rem; color: var(--text); }
+
+    /* ── Load more ── */
+    .load-more-wrap {
+      text-align: center;
+      margin-top: 1.5rem;
+    }
+    .btn-load-more {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.6rem 2rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .btn-load-more:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.75rem 1.25rem;
+      font-size: 0.88rem;
+      color: var(--text);
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a class="brand" href="/">🌍 World<span>Vibes</span></a>
+
+  <div class="header-right">
+    <div class="search-box">
+      <input id="searchInput" type="search" placeholder="Search news…" />
+      <button onclick="applySearch()">🔍</button>
+    </div>
+    <button class="btn btn-fetch" id="fetchBtn" onclick="triggerFetch()">↻ Refresh feeds</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="stats-bar" id="statsBar">Loading stats…</div>
+
+  <!-- Filters -->
+  <div class="toolbar" id="langToolbar">
+    <span class="toolbar-label">Language:</span>
+    <button class="btn active" onclick="setFilter('language','all',this)">All</button>
+    <button class="btn" onclick="setFilter('language','en',this)">English</button>
+    <button class="btn" onclick="setFilter('language','pt',this)">Português</button>
+    <button class="btn" onclick="setFilter('language','es',this)">Español</button>
+  </div>
+
+  <div class="toolbar" id="catToolbar">
+    <span class="toolbar-label">Category:</span>
+    <button class="btn active" onclick="setFilter('category','all',this)" data-group="cat">All</button>
+  </div>
+
+  <!-- Articles -->
+  <div id="articles" class="grid"></div>
+  <div class="load-more-wrap" id="loadMoreWrap" style="display:none">
+    <button class="btn-load-more" onclick="loadMore()">Load more</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const PAGE_SIZE = 48;
+  let state = { category: 'all', language: 'all', search: '', offset: 0, loading: false };
+
+  // ── Utils ──────────────────────────────────────────────────────────────────
+  function toast(msg, duration = 3000) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), duration);
+  }
+
+  function relativeTime(dateStr) {
+    if (!dateStr) return '';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return `${d}d ago`;
+  }
+
+  function escHtml(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Fetch articles ─────────────────────────────────────────────────────────
+  async function loadArticles(append = false) {
+    if (state.loading) return;
+    state.loading = true;
+
+    const el = document.getElementById('articles');
+    if (!append) {
+      el.innerHTML = '<div class="spinner">Loading</div>';
+      state.offset = 0;
+    }
+
+    const params = new URLSearchParams({
+      category: state.category,
+      language: state.language,
+      limit:    PAGE_SIZE,
+      offset:   state.offset,
+    });
+    if (state.search) params.set('search', state.search);
+
+    try {
+      const res = await fetch(`/api/articles?${params}`);
+      const data = await res.json();
+
+      if (!append) el.innerHTML = '';
+
+      if (data.articles.length === 0 && !append) {
+        el.innerHTML = '<div class="empty"><h2>No articles found</h2><p>Try refreshing the feeds or changing filters.</p></div>';
+        document.getElementById('loadMoreWrap').style.display = 'none';
+      } else {
+        data.articles.forEach(a => el.appendChild(makeCard(a)));
+        state.offset += data.articles.length;
+        document.getElementById('loadMoreWrap').style.display =
+          data.articles.length < PAGE_SIZE ? 'none' : 'block';
+      }
+    } catch (e) {
+      el.innerHTML = `<div class="empty"><h2>Error loading articles</h2><p>${escHtml(e.message)}</p></div>`;
+    }
+
+    state.loading = false;
+  }
+
+  function makeCard(a) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = `
+      <div class="card-meta">
+        <span class="badge">${escHtml(a.category)}</span>
+        <span class="date">${relativeTime(a.pub_date)}</span>
+      </div>
+      <div class="card-title"><a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></div>
+      ${a.description ? `<div class="card-desc">${escHtml(a.description)}</div>` : ''}
+      <div class="card-feed">📰 ${escHtml(a.feed_name)}${a.author ? ' · ' + escHtml(a.author) : ''}</div>
+    `;
+    return div;
+  }
+
+  function loadMore() {
+    loadArticles(true);
+  }
+
+  // ── Filters ────────────────────────────────────────────────────────────────
+  function setFilter(key, val, btn) {
+    state[key] = val;
+    // deactivate siblings
+    const group = btn.parentElement.querySelectorAll('.btn');
+    group.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadArticles();
+  }
+
+  function applySearch() {
+    state.search = document.getElementById('searchInput').value.trim();
+    loadArticles();
+  }
+
+  document.getElementById('searchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') applySearch();
+  });
+
+  // ── Categories ─────────────────────────────────────────────────────────────
+  async function loadCategories() {
+    try {
+      const cats = await (await fetch('/api/categories')).json();
+      const toolbar = document.getElementById('catToolbar');
+      cats.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.textContent = cat;
+        btn.onclick = () => setFilter('category', cat, btn);
+        toolbar.appendChild(btn);
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const s = await (await fetch('/api/stats')).json();
+      const bar = document.getElementById('statsBar');
+      const last = s.lastFetch ? new Date(s.lastFetch).toLocaleString() : 'never';
+      bar.innerHTML = `
+        <div>📋 <strong>${s.total.toLocaleString()}</strong> articles</div>
+        <div>📂 <strong>${s.byCategory.length}</strong> categories</div>
+        <div>🌐 <strong>${s.byLanguage.map(l=>`${l.language.toUpperCase()} ${l.count}`).join(' · ')}</strong></div>
+        <div>🕐 Last fetch: <strong>${last}</strong></div>
+      `;
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Manual fetch ───────────────────────────────────────────────────────────
+  async function triggerFetch() {
+    const btn = document.getElementById('fetchBtn');
+    btn.disabled = true;
+    btn.textContent = '↻ Fetching…';
+    toast('Fetching all RSS feeds…');
+    try {
+      await fetch('/api/fetch', { method: 'POST' });
+      setTimeout(async () => {
+        await Promise.all([loadStats(), loadArticles()]);
+        toast('✓ Feeds refreshed!');
+        btn.disabled = false;
+        btn.textContent = '↻ Refresh feeds';
+      }, 3000);
+    } catch (e) {
+      toast('Error triggering fetch');
+      btn.disabled = false;
+      btn.textContent = '↻ Refresh feeds';
+    }
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  (async () => {
+    await Promise.all([loadCategories(), loadStats()]);
+    await loadArticles();
+  })();
+</script>
+</body>
+</html>
