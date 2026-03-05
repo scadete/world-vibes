@@ -186,27 +186,56 @@ function getTrending(hours = 24, topN = 20) {
 // ── Related articles ─────────────────────────────────────────────────────────
 
 function getRelated(articleId, limit = 5) {
-  const article = db.prepare("SELECT id, title FROM articles WHERE id = ?").get(articleId);
+  const article = db.prepare("SELECT id, title, description, category, language FROM articles WHERE id = ?").get(articleId);
   if (!article) return [];
 
-  const terms = article.title
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 3 && !STOPWORDS.has(w.toLowerCase()))
-    .slice(0, 6)
-    .join(" OR ");
+  // Extract keywords from title + description for richer context
+  const text = `${article.title} ${article.description || ""}`;
+  const seen = new Set();
+  const keywords = [];
+  for (const w of text.replace(/[^\w\s]/g, " ").split(/\s+/)) {
+    const lower = w.toLowerCase();
+    if (w.length > 3 && !STOPWORDS.has(lower) && !/^\d+$/.test(w) && !seen.has(lower)) {
+      seen.add(lower);
+      keywords.push(`"${w}"`);
+    }
+    if (keywords.length >= 8) break;
+  }
 
-  if (!terms) return [];
+  if (!keywords.length) return [];
+
+  const andQuery = keywords.join(" AND ");
+  const orQuery  = keywords.join(" OR ");
 
   try {
-    return db.prepare(`
+    // First pass: strict AND match + same language
+    const results = db.prepare(`
       SELECT a.* FROM articles a
       JOIN articles_fts ON a.id = articles_fts.rowid
       WHERE articles_fts MATCH ?
         AND a.id != ?
+        AND a.language = ?
       ORDER BY bm25(articles_fts)
       LIMIT ?
-    `).all(terms, articleId, limit);
+    `).all(andQuery, articleId, article.language, limit);
+
+    if (results.length >= limit) return results;
+
+    // Second pass: OR match, same language + category, excluding already found
+    const excludeIds = [articleId, ...results.map((r) => r.id)];
+    const placeholders = excludeIds.map(() => "?").join(",");
+    const extra = db.prepare(`
+      SELECT a.* FROM articles a
+      JOIN articles_fts ON a.id = articles_fts.rowid
+      WHERE articles_fts MATCH ?
+        AND a.id NOT IN (${placeholders})
+        AND a.language = ?
+        AND a.category = ?
+      ORDER BY bm25(articles_fts)
+      LIMIT ?
+    `).all(orQuery, ...excludeIds, article.language, article.category, limit - results.length);
+
+    return [...results, ...extra];
   } catch {
     return [];
   }
