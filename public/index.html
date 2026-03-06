@@ -309,9 +309,9 @@
     .cluster-badge {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: 0.2rem;
       font-size: 0.7rem;
-      padding: 0.2rem 0.55rem;
+      padding: 0.15rem 0.4rem;
       border-radius: 99px;
       background: #f59e0b22;
       color: #fbbf24;
@@ -319,6 +319,23 @@
       white-space: nowrap;
       font-weight: 600;
     }
+
+    /* ── Clear filters button ── */
+    button.btn-clear {
+      background: #f8717122;
+      border: 1px solid #f8717155;
+      color: var(--danger);
+      padding: 0.45rem 0.8rem;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: none;
+      align-items: center;
+      gap: 0.3rem;
+      transition: background 0.15s;
+    }
+    button.btn-clear.visible { display: inline-flex; }
+    button.btn-clear:hover { background: #f8717133; }
 
     /* ── Highlights section ── */
     .highlights-section {
@@ -413,6 +430,7 @@
       <button onclick="applySearch()">🔍</button>
     </div>
     <button class="btn btn-fetch" id="fetchBtn" onclick="triggerFetch()">↻ Refresh feeds</button>
+    <button class="btn-clear" id="clearFiltersBtn" onclick="clearFilters()">✕ Limpar filtros</button>
   </div>
 </header>
 
@@ -539,7 +557,7 @@
     div.innerHTML = `
       <div class="card-meta">
         <span class="badge">${escHtml(a.category)}</span>
-        ${a.source_count >= 2 ? `<span class="cluster-badge">📡 ${a.source_count} fontes</span>` : ''}
+        ${a.source_count >= 2 ? `<span class="cluster-badge" title="${a.source_count} fontes diferentes">📡 ${a.source_count}</span>` : ''}
         <span class="date">${relativeTime(a.pub_date)}</span>
       </div>
       <div class="card-title"><a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></div>
@@ -592,12 +610,28 @@
   }
 
   // ── Filters ────────────────────────────────────────────────────────────────
+  function updateClearBtn() {
+    const active = state.search !== '' || state.category !== 'all' || state.language !== 'all';
+    document.getElementById('clearFiltersBtn').classList.toggle('visible', active);
+  }
+
+  function clearFilters() {
+    state.search   = '';
+    state.category = 'all';
+    state.language = 'all';
+    document.getElementById('searchInput').value = '';
+    document.querySelectorAll('#langToolbar .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+    document.querySelectorAll('#catToolbar  .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+    updateClearBtn();
+    loadArticles();
+  }
+
   function setFilter(key, val, btn) {
     state[key] = val;
-    // deactivate siblings
     const group = btn.parentElement.querySelectorAll('.btn');
     group.forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    updateClearBtn();
     loadArticles();
   }
 
@@ -611,12 +645,14 @@
 
   function applySearch() {
     state.search = document.getElementById('searchInput').value.trim();
+    updateClearBtn();
     loadArticles();
   }
 
   document.getElementById('searchInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') applySearch();
   });
+  document.getElementById('searchInput').addEventListener('search', () => applySearch());
 
   // ── Categories ─────────────────────────────────────────────────────────────
   async function loadCategories() {
@@ -662,7 +698,7 @@
         item.className = 'highlight-item';
         const sources = cluster.sources ? cluster.sources.split(',').join(' · ') : '';
         item.innerHTML = `
-          <span class="cluster-badge">📡 ${cluster.source_count} fontes</span>
+          <span class="cluster-badge" title="${cluster.source_count} fontes diferentes">📡 ${cluster.source_count}</span>
           <div>
             <div class="highlight-item-title">${escHtml(cluster.sample_title || '')}</div>
             ${sources ? `<div class="highlight-item-sources">${escHtml(sources)}</div>` : ''}
@@ -670,10 +706,10 @@
         `;
         if (cluster.sample_title) {
           item.addEventListener('click', () => {
-            // Extract first few words as search query
             const q = (cluster.sample_title || '').split(/\s+/).slice(0, 4).join(' ');
             document.getElementById('searchInput').value = q;
             state.search = q;
+            updateClearBtn();
             loadArticles();
           });
         }
@@ -699,6 +735,7 @@
         tag.addEventListener('click', () => {
           document.getElementById('searchInput').value = term;
           state.search = term;
+          updateClearBtn();
           loadArticles();
         });
         container.appendChild(tag);

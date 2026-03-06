@@ -70,21 +70,65 @@ const insertArticle = db.prepare(`
 // ── Stopwords ─────────────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
-  // English
+  // English — function words
   "the","and","for","are","was","with","this","that","have","from","they",
   "will","been","their","said","what","which","when","were","also","into",
   "more","than","then","your","about","after","over","other","only","some",
   "just","most","like","time","would","could","should","there","these",
   "those","each","very","much","well","such","know","even","both","come",
-  // Portuguese
+  "here","its","has","his","her","our","any","all","now","new","can",
+  "may","one","two","three","how","who","but","not","yet","still",
+  // English — days & months
+  "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
+  "january","february","march","april","june","july","august",
+  "september","october","november","december",
+  // English — common news verbs (low signal)
+  "says","say","said","told","tell","tells","report","reports","reported",
+  "calls","called","asks","asked","makes","made","take","took","give","gave",
+  "held","left","gets","sets","hits","puts","runs","goes","went","come",
+  "came","seen","sees","keep","kept","used","uses","want","wants","need",
+  "needs","show","shows","find","found","help","helps","plan","plans",
+  "move","moves","turn","turns","face","faces","lead","leads","meet","meets",
+  "hold","holds","open","opens","push","claim","claims","warn","warns",
+  "urge","urges","seek","seeks","back","draw","drawn","sign","vote","votes",
+  "raise","raised","lower","lowered","named","amid","despite","according",
+  // English — generic news nouns (low signal)
+  "news","year","years","week","weeks","days","today","month","months",
+  "time","times","people","world","country","countries","state","states",
+  "government","president","minister","official","officials","statement",
+  "first","last","next","high","away","live","deal","talk","talks",
+  "says","call","calls","case","cases","part","parts","group","groups",
+  "area","areas","home","city","cities","place","places","point","points",
+  "right","rights","side","sides","life","lives","line","lines","long",
+  "number","numbers","major","major","latest","former","senior","amid",
+  // Portuguese — function words
   "para","como","uma","dos","das","mais","por","isso","este","esta","pelo",
   "pela","seus","suas","sobre","entre","antes","depois","ainda","pode",
   "pois","quando","onde","numa","quem","qual","tudo","toda","todos","todas",
   "novo","nova","novos","novas","anos","sendo","foram","têm","após","caso",
-  // Spanish
+  // Portuguese — days & months
+  "segunda","terça","quarta","quinta","sexta","sábado","domingo",
+  "janeiro","fevereiro","março","abril","maio","junho","julho","agosto",
+  "setembro","outubro","novembro","dezembro",
+  // Portuguese — common news verbs & nouns
+  "disse","afirmou","segundo","conforme","durante","enquanto","através",
+  "governo","presidente","ministro","primeiro","última","último",
+  "declarou","anunciou","informou","pessoas","mundo","país","países",
+  "estado","estados","cidade","cidades","semana","meses","hoje","ontem",
+  "desta","deste","nesta","neste","pelo","pela","pelos","pelas",
+  // Spanish — function words
   "para","como","los","las","sus","del","pero","sido","estos","estas",
   "todo","toda","ellos","ellas","después","antes","sobre","también","puede",
   "están","tiene","tienen","según","través","contra","durante","mismo","hace",
+  // Spanish — days & months
+  "lunes","martes","miércoles","jueves","viernes","sábado","domingo",
+  "enero","febrero","marzo","abril","mayo","junio","julio","agosto",
+  "septiembre","octubre","noviembre","diciembre",
+  // Spanish — common news verbs & nouns
+  "dice","dijo","afirmó","señaló","aseguró","informó","anunció",
+  "gobierno","presidente","ministro","primero","nueva","nuevo",
+  "personas","mundo","país","países","estado","estados","ciudad",
+  "ciudades","semana","meses","hoy","ayer","esta","este","estos",
 ]);
 
 // ── Story clustering ──────────────────────────────────────────────────────────
@@ -317,6 +361,7 @@ function getTrending(hours = 24, topN = 20) {
   }
 
   return Object.entries(freq)
+    .filter(([, count]) => count >= 3)
     .sort((a, b) => b[1] - a[1])
     .slice(0, topN)
     .map(([term, count]) => ({ term, count }));
