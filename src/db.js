@@ -232,7 +232,7 @@ function saveArticles(articles) {
 async function embedAndCluster() {
   const { embed } = require("./embeddings");
   const unembedded = db.prepare(
-    "SELECT id, title, description FROM articles WHERE embedding IS NULL ORDER BY fetched_at DESC LIMIT 200"
+    "SELECT id, title, description FROM articles WHERE embedding IS NULL ORDER BY fetched_at DESC"
   ).all();
 
   if (unembedded.length === 0) return;
@@ -291,7 +291,7 @@ function getArticles({ category, language, search, limit = 50, offset = 0 } = {}
       params.push(language);
     }
 
-    query += " ORDER BY COALESCE(c.source_count, 1) DESC, bm25(articles_fts), a.pub_date DESC";
+    query += " ORDER BY bm25(articles_fts), a.pub_date DESC, COALESCE(c.source_count, 1) DESC";
     query += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
