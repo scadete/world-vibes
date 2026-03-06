@@ -56,6 +56,11 @@ try {
   db.exec("ALTER TABLE articles ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)");
 } catch { /* column already exists */ }
 
+// Add embedding column for ML-based clustering (idempotent migration)
+try {
+  db.exec("ALTER TABLE articles ADD COLUMN embedding BLOB");
+} catch { /* column already exists */ }
+
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_articles_cluster_id ON articles(cluster_id);
 `);
@@ -101,6 +106,11 @@ const STOPWORDS = new Set([
   "area","areas","home","city","cities","place","places","point","points",
   "right","rights","side","sides","life","lives","line","lines","long",
   "number","numbers","major","major","latest","former","senior","amid",
+  // English — RSS/blog boilerplate
+  "reading","read","continue","continued","click","subscribe","follow",
+  "comment","comments","leave","share","tweet","posted","post","appeared",
+  "https","http","www","via","full","story","article","source","author",
+  "million","billion","trillion","thousand","percent",
   // Portuguese — function words
   "para","como","uma","dos","das","mais","por","isso","este","esta","pelo",
   "pela","seus","suas","sobre","entre","antes","depois","ainda","pode",
@@ -116,6 +126,10 @@ const STOPWORDS = new Set([
   "declarou","anunciou","informou","pessoas","mundo","país","países",
   "estado","estados","cidade","cidades","semana","meses","hoje","ontem",
   "desta","deste","nesta","neste","pelo","pela","pelos","pelas",
+  // Portuguese — RSS/blog boilerplate
+  "leia","clique","acesse","saiba","veja","confira","matéria","notícia",
+  "feira","leia","conteúdo","texto","artigo","postagem","publicado",
+  "continua","continue","clique","aqui","mais","fonte","autor",
   // Spanish — function words
   "para","como","los","las","sus","del","pero","sido","estos","estas",
   "todo","toda","ellos","ellas","después","antes","sobre","también","puede",
@@ -131,71 +145,72 @@ const STOPWORDS = new Set([
   "ciudades","semana","meses","hoy","ayer","esta","este","estos",
 ]);
 
-// ── Story clustering ──────────────────────────────────────────────────────────
+// ── Story clustering (embedding-based) ────────────────────────────────────────
 
-const stmtGetArticleForCluster = db.prepare(
-  "SELECT id, title, language, feed_name, cluster_id FROM articles WHERE id = ?"
-);
-const stmtFindClusterMatch = db.prepare(`
-  SELECT a.id, a.cluster_id FROM articles a
-  JOIN articles_fts ON a.id = articles_fts.rowid
-  WHERE articles_fts MATCH ?
-    AND a.id != ?
-    AND a.language = ?
-    AND a.feed_name != ?
-    AND a.pub_date >= datetime('now', '-48 hours')
-  ORDER BY bm25(articles_fts)
-  LIMIT 1
-`);
-const stmtSetCluster   = db.prepare("UPDATE articles SET cluster_id = ? WHERE id = ?");
+const SIMILARITY_THRESHOLD = 0.78;
+
+const stmtSetCluster    = db.prepare("UPDATE articles SET cluster_id = ? WHERE id = ?");
 const stmtInsertCluster = db.prepare(
   "INSERT INTO clusters (article_count, source_count) VALUES (?, ?)"
 );
 const stmtRecalcCluster = db.prepare(`
   UPDATE clusters SET
-    article_count = (SELECT COUNT(*)               FROM articles WHERE cluster_id = ?),
+    article_count = (SELECT COUNT(*)                  FROM articles WHERE cluster_id = ?),
     source_count  = (SELECT COUNT(DISTINCT feed_name) FROM articles WHERE cluster_id = ?),
     updated_at    = datetime('now')
   WHERE id = ?
 `);
+const stmtGetCandidates = db.prepare(`
+  SELECT id, cluster_id, embedding FROM articles
+  WHERE pub_date >= datetime('now', '-48 hours')
+    AND id != ?
+    AND language = ?
+    AND feed_name != ?
+    AND embedding IS NOT NULL
+`);
+
+function cosineSim(bufA, bufB) {
+  const a = new Float32Array(bufA.buffer, bufA.byteOffset, bufA.byteLength / 4);
+  const b = new Float32Array(bufB.buffer, bufB.byteOffset, bufB.byteLength / 4);
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom > 0 ? dot / denom : 0;
+}
 
 function clusterArticle(articleId) {
-  const article = stmtGetArticleForCluster.get(articleId);
-  if (!article) return;
+  const article = db.prepare(
+    "SELECT id, language, feed_name, cluster_id, embedding FROM articles WHERE id = ?"
+  ).get(articleId);
+  if (!article || !article.embedding) return;
 
-  // Extract top-3 significant keywords from the title for strict AND matching
-  const keywords = article.title
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter(w => w.length > 4 && !STOPWORDS.has(w.toLowerCase()) && !/^\d+$/.test(w))
-    .slice(0, 3)
-    .map(w => `"${w}"`);
+  const candidates = stmtGetCandidates.all(articleId, article.language, article.feed_name);
 
-  if (keywords.length < 2) return; // not enough signal
+  let bestMatch = null;
+  let bestSim   = SIMILARITY_THRESHOLD;
 
-  let match;
-  try {
-    match = stmtFindClusterMatch.get(
-      keywords.join(" AND "),
-      articleId,
-      article.language,
-      article.feed_name
-    );
-  } catch {
-    return; // FTS query error (e.g. special chars) — skip clustering
+  for (const cand of candidates) {
+    if (!cand.embedding) continue;
+    const sim = cosineSim(article.embedding, cand.embedding);
+    if (sim > bestSim) {
+      bestSim   = sim;
+      bestMatch = cand;
+    }
   }
 
-  if (!match) return;
+  if (!bestMatch) return;
 
-  if (match.cluster_id) {
-    // Join the existing cluster
-    stmtSetCluster.run(match.cluster_id, articleId);
-    stmtRecalcCluster.run(match.cluster_id, match.cluster_id, match.cluster_id);
+  if (bestMatch.cluster_id) {
+    stmtSetCluster.run(bestMatch.cluster_id, articleId);
+    stmtRecalcCluster.run(bestMatch.cluster_id, bestMatch.cluster_id, bestMatch.cluster_id);
   } else {
-    // Create a new cluster for both articles
     const cid = stmtInsertCluster.run(2, 2).lastInsertRowid;
     stmtSetCluster.run(cid, articleId);
-    stmtSetCluster.run(cid, match.id);
+    stmtSetCluster.run(cid, bestMatch.id);
     stmtRecalcCluster.run(cid, cid, cid);
   }
 }
@@ -203,18 +218,39 @@ function clusterArticle(articleId) {
 // ── Save articles ─────────────────────────────────────────────────────────────
 
 function saveArticles(articles) {
-  const newIds = [];
-  const insertMany = db.transaction((items) => {
+  return db.transaction((items) => {
+    let count = 0;
     for (const item of items) {
-      const info = insertArticle.run(item);
-      if (info.changes > 0) newIds.push(info.lastInsertRowid);
+      if (insertArticle.run(item).changes > 0) count++;
     }
-    return newIds.length;
-  });
-  const count = insertMany(articles);
-  // Run clustering outside transaction (FTS reads can't be inside a write tx)
-  for (const id of newIds) clusterArticle(id);
-  return count;
+    return count;
+  })(articles);
+}
+
+// ── Embed new articles and cluster them (called after each fetchAll) ───────────
+
+async function embedAndCluster() {
+  const { embed } = require("./embeddings");
+  const unembedded = db.prepare(
+    "SELECT id, title, description FROM articles WHERE embedding IS NULL ORDER BY fetched_at DESC LIMIT 200"
+  ).all();
+
+  if (unembedded.length === 0) return;
+  console.log(`[embeddings] Processing ${unembedded.length} articles…`);
+
+  const stmtSaveEmb = db.prepare("UPDATE articles SET embedding = ? WHERE id = ?");
+
+  for (const article of unembedded) {
+    const text = `${article.title}. ${article.description || ""}`.slice(0, 512);
+    try {
+      const buf = await embed(text);
+      stmtSaveEmb.run(buf, article.id);
+      clusterArticle(article.id);
+    } catch (err) {
+      console.error(`[embeddings] article ${article.id}: ${err.message}`);
+    }
+  }
+  console.log("[embeddings] Done.");
 }
 
 // ── FTS query sanitizer ───────────────────────────────────────────────────────
@@ -230,9 +266,8 @@ function toFTSQuery(q) {
 
 // ── Get articles ──────────────────────────────────────────────────────────────
 
-function getArticles({ category, language, search, sort, limit = 50, offset = 0 } = {}) {
+function getArticles({ category, language, search, limit = 50, offset = 0 } = {}) {
   const params = [];
-  const byRelevance = sort === "relevance";
 
   if (search) {
     const ftsQuery = toFTSQuery(search);
@@ -256,9 +291,7 @@ function getArticles({ category, language, search, sort, limit = 50, offset = 0 
       params.push(language);
     }
 
-    query += byRelevance
-      ? " ORDER BY COALESCE(c.source_count, 1) DESC, bm25(articles_fts), a.pub_date DESC"
-      : " ORDER BY bm25(articles_fts), a.pub_date DESC";
+    query += " ORDER BY COALESCE(c.source_count, 1) DESC, bm25(articles_fts), a.pub_date DESC";
     query += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
@@ -286,9 +319,7 @@ function getArticles({ category, language, search, sort, limit = 50, offset = 0 
     params.push(language);
   }
 
-  query += byRelevance
-    ? " ORDER BY COALESCE(c.source_count, 1) DESC, a.pub_date DESC, a.fetched_at DESC"
-    : " ORDER BY a.pub_date DESC, a.fetched_at DESC";
+  query += " ORDER BY a.pub_date DESC, COALESCE(c.source_count, 1) DESC, a.fetched_at DESC";
   query += " LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
@@ -424,6 +455,7 @@ function getRelated(articleId, limit = 5) {
 
 module.exports = {
   saveArticles,
+  embedAndCluster,
   getArticles,
   getCategories,
   getStats,

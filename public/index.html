@@ -451,13 +451,6 @@
     <div class="highlights-list" id="highlightsList"></div>
   </div>
 
-  <!-- Sort -->
-  <div class="toolbar" id="sortToolbar">
-    <span class="toolbar-label">Ordenar:</span>
-    <button class="btn active" onclick="setSort('latest', this)">Mais recentes</button>
-    <button class="btn" onclick="setSort('relevance', this)">Por relevância</button>
-  </div>
-
   <!-- Filters -->
   <div class="toolbar" id="langToolbar">
     <span class="toolbar-label">Language:</span>
@@ -483,7 +476,7 @@
 
 <script>
   const PAGE_SIZE = 48;
-  let state = { category: 'all', language: 'all', search: '', sort: 'latest', offset: 0, loading: false };
+  let state = { category: 'all', language: 'all', search: '', offset: 0, loading: false };
 
   // ── Utils ──────────────────────────────────────────────────────────────────
   function toast(msg, duration = 3000) {
@@ -527,7 +520,6 @@
       offset:   state.offset,
     });
     if (state.search) params.set('search', state.search);
-    if (state.sort === 'relevance') params.set('sort', 'relevance');
 
     try {
       const res = await fetch(`/api/articles?${params}`);
@@ -635,13 +627,6 @@
     loadArticles();
   }
 
-  function setSort(val, btn) {
-    state.sort = val;
-    const group = btn.parentElement.querySelectorAll('.btn');
-    group.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    loadArticles();
-  }
 
   function applySearch() {
     state.search = document.getElementById('searchInput').value.trim();
