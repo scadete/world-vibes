@@ -87,6 +87,7 @@ try {
     { source: "IODA",      category: "internet",     description: "Interrupções de internet (Georgia Tech)" },
     { source: "USGS",      category: "seismic",      description: "Actividade sísmica (USGS)" },
     { source: "NOAA",      category: "space",        description: "Clima espacial (NOAA/SWPC)" },
+    { source: "FOREX",     category: "economic",     description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
   ];
   const _seedStmt = db.prepare(
     "INSERT OR IGNORE INTO risk_fetch_log (source, category, description, signal_count) VALUES (@source, @category, @description, 0)"
@@ -515,13 +516,8 @@ const insertRiskSignal = db.prepare(`
 `);
 
 const upsertFetchLog = db.prepare(`
-  INSERT INTO risk_fetch_log (source, category, description, last_fetched_at, signal_count)
+  INSERT OR REPLACE INTO risk_fetch_log (source, category, description, last_fetched_at, signal_count)
   VALUES (@source, @category, @description, @last_fetched_at, @signal_count)
-  ON CONFLICT(source) DO UPDATE SET
-    category        = excluded.category,
-    description     = excluded.description,
-    last_fetched_at = excluded.last_fetched_at,
-    signal_count    = excluded.signal_count
 `);
 
 function saveRiskSignals(signals, logEntries = []) {

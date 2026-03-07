@@ -22,6 +22,7 @@ const SOURCE_META = [
   { source: "IODA",      category: "internet",      description: "Interrupções de internet (Georgia Tech)" },
   { source: "USGS",      category: "seismic",       description: "Actividade sísmica (USGS)" },
   { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
+  { source: "FOREX",     category: "economic",      description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
 ];
 
 // ── Level helpers ─────────────────────────────────────────────────────────────
@@ -261,11 +262,69 @@ async function fetchNOAA() {
     });
 }
 
+// ── FOREX — Currency stress (Frankfurter.app / ECB data) ─────────────────────
+
+const FOREX_CURRENCIES = ["TRY", "BRL", "ZAR", "PLN", "MXN", "CNY", "HUF"];
+const FOREX_COUNTRY = {
+  TRY: "Turquia", BRL: "Brasil", ZAR: "África do Sul",
+  PLN: "Polónia", MXN: "México", CNY: "China", HUF: "Hungria",
+};
+
+async function fetchForex() {
+  const sym = FOREX_CURRENCIES.join(",");
+
+  // Use "previous business day" by requesting 3 calendar days back —
+  // Frankfurter always returns the latest available trading day for any date range.
+  const prevDate = new Date(Date.now() - 3 * 24 * 3600 * 1000)
+    .toISOString().split("T")[0];
+
+  const [today, prev] = await Promise.all([
+    fetch(`https://api.frankfurter.app/latest?from=USD&to=${sym}`,
+      { signal: AbortSignal.timeout(15000) }).then((r) => r.json()),
+    fetch(`https://api.frankfurter.app/${prevDate}?from=USD&to=${sym}`,
+      { signal: AbortSignal.timeout(15000) }).then((r) => r.json()),
+  ]);
+
+  const todayRates = today.rates || {};
+  const prevRates  = prev.rates  || {};
+
+  return FOREX_CURRENCIES
+    .map((c) => {
+      const rate = todayRates[c];
+      const base = prevRates[c];
+      if (!rate || !base) return null;
+
+      // positive changePct = currency depreciated vs USD (more local units per $)
+      const changePct = ((rate - base) / base) * 100;
+      if (Math.abs(changePct) < 0.5) return null; // skip minor noise
+
+      const score = Math.abs(changePct) > 5 ? 4
+                  : Math.abs(changePct) > 2 ? 3
+                  : 2;
+      const sign = changePct > 0 ? "+" : "";
+      return {
+        guid:     `forex-${c}-${today.date}`,
+        source:   "FOREX",
+        category: "economic",
+        title:    `USD/${c}: ${rate.toFixed(3)} (${sign}${changePct.toFixed(2)}% vs ${prevDate})`,
+        description: changePct > 0
+          ? `${FOREX_COUNTRY[c] || c}: moeda depreciou ${Math.abs(changePct).toFixed(2)}% face ao dólar`
+          : `${FOREX_COUNTRY[c] || c}: moeda valorizou ${Math.abs(changePct).toFixed(2)}% face ao dólar`,
+        level: scoreToLevel(score),
+        score,
+        url:      "https://frankfurter.dev",
+        location: FOREX_COUNTRY[c] || c,
+        event_at: safeDate(today.date ? today.date + "T12:00:00Z" : null),
+      };
+    })
+    .filter(Boolean);
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function fetchRiskSignals() {
   console.log("[risk] Fetching OSINT risk signals…");
-  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA];
+  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA, fetchForex];
   const results = await Promise.allSettled(fetchers.map((f) => f()));
 
   const signals = [];
