@@ -215,11 +215,20 @@ async function fetchNOAA() {
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   const json = await res.json();
 
+  // NOAA issue_datetime is "YYYY-MM-DD HH:MM:SS.mmm" (space, no T, no timezone)
+  function noaaToISO(dt) {
+    if (!dt) return null;
+    // Replace space with T and append Z if no timezone present
+    const s = dt.replace(' ', 'T');
+    return s.endsWith('Z') || /[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z';
+  }
+
   const cutoff = Date.now() - 48 * 3600 * 1000;
   return (Array.isArray(json) ? json : [])
     .filter((a) => {
       if (!a.issue_datetime) return false;
-      return new Date(a.issue_datetime + "Z").getTime() >= cutoff;
+      const t = new Date(noaaToISO(a.issue_datetime)).getTime();
+      return !isNaN(t) && t >= cutoff;
     })
     .map((a, idx) => {
       const msg = a.message || "";
@@ -247,7 +256,7 @@ async function fetchNOAA() {
         score,
         url: "https://www.swpc.noaa.gov/products/alerts-watches-and-warnings",
         location: "Clima Espacial Global",
-        event_at: safeDate(a.issue_datetime ? a.issue_datetime + "Z" : null),
+        event_at: safeDate(noaaToISO(a.issue_datetime)),
       };
     });
 }

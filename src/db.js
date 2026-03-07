@@ -520,17 +520,24 @@ function saveRiskSignals(signals, logEntries = []) {
 }
 
 function getRiskSignals(limit = 30) {
-  const signals = db.prepare(`
-    SELECT * FROM risk_signals
-    WHERE event_at >= datetime('now', '-72 hours')
-       OR fetched_at >= datetime('now', '-24 hours')
-    ORDER BY score DESC, event_at DESC
-    LIMIT ?
-  `).all(limit);
+  let signals = [];
+  let sources = [];
 
-  const sources = db.prepare(
-    "SELECT * FROM risk_fetch_log ORDER BY source ASC"
-  ).all();
+  try {
+    signals = db.prepare(`
+      SELECT * FROM risk_signals
+      WHERE event_at >= datetime('now', '-72 hours')
+         OR fetched_at >= datetime('now', '-24 hours')
+      ORDER BY score DESC, event_at DESC
+      LIMIT ?
+    `).all(limit);
+  } catch { /* risk_signals might not exist yet on first run */ }
+
+  try {
+    sources = db.prepare(
+      "SELECT * FROM risk_fetch_log ORDER BY source ASC"
+    ).all();
+  } catch { /* risk_fetch_log might not exist yet */ }
 
   const lastFetch = sources.reduce((max, s) => {
     if (!s.last_fetched_at) return max;

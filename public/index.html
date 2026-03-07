@@ -800,7 +800,8 @@
 
   function openRiskModal() {
     const overlay = document.getElementById('riskModalOverlay');
-    if (_riskMeta) renderRiskModal(_riskMeta);
+    // Always render — with data if available, or a "pending" state
+    renderRiskModal(_riskMeta || { last_fetch: null, sources: [] });
     overlay.classList.add('open');
   }
   function closeRiskModal() {
@@ -810,8 +811,16 @@
 
   function renderRiskModal(meta) {
     const body = document.getElementById('riskModalBody');
-    const since = meta.last_fetch ? relativeTime(meta.last_fetch) : '—';
-    const rows = (meta.sources || []).map(s => {
+    const sources = (meta && meta.sources) || [];
+    const since = (meta && meta.last_fetch) ? relativeTime(meta.last_fetch) : null;
+
+    if (!sources.length) {
+      body.innerHTML = `<div class="risk-modal-row" style="color:var(--text-muted)">
+        ${since ? `última consulta: ${since}` : '[ nenhuma consulta efectuada ainda ]'}</div>`;
+      return;
+    }
+
+    const rows = sources.map(s => {
       const n = s.signal_count || 0;
       const label = n === 1 ? '1 sinal' : `${n} sinais`;
       const when = s.last_fetched_at ? relativeTime(s.last_fetched_at) : 'nunca';
@@ -821,9 +830,10 @@
         <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
       </div>`;
     }).join('');
+
     body.innerHTML = `
       <div class="risk-modal-row" style="color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.4rem;margin-bottom:0.2rem">
-        última consulta: ${since}
+        última consulta: ${since || '—'}
       </div>${rows}`;
   }
 
@@ -833,13 +843,14 @@
       const resp = await (await fetch('/api/risk-signals')).json();
       // Handle both old (array) and new ({ signals, meta }) format
       const signals = Array.isArray(resp) ? resp : (resp.signals || []);
-      const meta    = Array.isArray(resp) ? null  : (resp.meta || null);
+      const meta    = Array.isArray(resp) ? { last_fetch: null, sources: [] } : (resp.meta || { last_fetch: null, sources: [] });
 
+      // Always set _riskMeta so modal has data to show
       _riskMeta = meta;
 
       if (!signals.length) {
-        const sourceNames = meta ? (meta.sources || []).map(s => s.source).join(' · ') : '—';
-        const since = (meta && meta.last_fetch) ? relativeTime(meta.last_fetch) : '—';
+        const sourceNames = (meta.sources || []).map(s => s.source).join(' · ') || '—';
+        const since = meta.last_fetch ? relativeTime(meta.last_fetch) : '—';
         list.innerHTML = `
           <div class="risk-empty">[ nenhum sinal detectado nas últimas 72h ]</div>
           <div class="risk-empty" style="margin-top:0.2rem">fontes consultadas ${since}: ${escHtml(sourceNames)}</div>`;
@@ -859,7 +870,9 @@
         if (sig.url) item.addEventListener('click', () => window.open(sig.url, '_blank'));
         list.appendChild(item);
       });
-    } catch (err) {
+    } catch {
+      // Preserve any existing _riskMeta so modal still shows previous state
+      if (!_riskMeta) _riskMeta = { last_fetch: null, sources: [] };
       list.innerHTML = '<div class="risk-empty">[ erro ao carregar sinais OSINT ]</div>';
     }
   }
