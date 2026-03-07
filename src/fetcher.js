@@ -31,7 +31,7 @@ async function fetchFeed(feed) {
       link: item.link || "",
       description: sanitize(item.contentSnippet || item.summary || item.description),
       content: sanitize(item.contentEncoded || item.content),
-      pub_date: item.pubDate || item.isoDate || new Date().toISOString(),
+      pub_date: item.isoDate || (item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString()),
       author: item.creator || item.dcCreator || item.author || null,
       feed_name: feed.name,
       category: feed.category,
