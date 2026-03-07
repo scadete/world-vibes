@@ -1,4 +1,4 @@
-const CACHE = 'wv-v1';
+const CACHE = 'wv-v2';
 const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.json'];
 
 self.addEventListener('install', e => {
