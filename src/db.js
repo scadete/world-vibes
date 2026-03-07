@@ -51,6 +51,25 @@ db.exec(`
   );
 `);
 
+// ── Risk signals table ────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS risk_signals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    guid        TEXT UNIQUE NOT NULL,
+    source      TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    description TEXT,
+    level       TEXT NOT NULL,
+    score       INTEGER NOT NULL,
+    url         TEXT,
+    location    TEXT,
+    event_at    TEXT,
+    fetched_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_risk_score ON risk_signals(score DESC, event_at DESC);
+`);
+
 // Add cluster_id column to articles if not yet present (idempotent migration)
 try {
   db.exec("ALTER TABLE articles ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)");
@@ -462,6 +481,32 @@ function getRelated(articleId, limit = 5) {
   }
 }
 
+// ── Risk signals ──────────────────────────────────────────────────────────────
+
+const insertRiskSignal = db.prepare(`
+  INSERT OR REPLACE INTO risk_signals
+    (guid, source, category, title, description, level, score, url, location, event_at)
+  VALUES
+    (@guid, @source, @category, @title, @description, @level, @score, @url, @location, @event_at)
+`);
+
+function saveRiskSignals(signals) {
+  const insert = db.transaction((rows) => {
+    for (const s of rows) insertRiskSignal(s);
+  });
+  insert(signals);
+}
+
+function getRiskSignals(limit = 30) {
+  return db.prepare(`
+    SELECT * FROM risk_signals
+    WHERE event_at >= datetime('now', '-72 hours')
+       OR fetched_at >= datetime('now', '-24 hours')
+    ORDER BY score DESC, event_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
 module.exports = {
   saveArticles,
   embedAndCluster,
@@ -471,4 +516,6 @@ module.exports = {
   getTrending,
   getRelated,
   getTopClusters,
+  saveRiskSignals,
+  getRiskSignals,
 };

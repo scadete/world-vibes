@@ -2,7 +2,8 @@ const express = require("express");
 const cron = require("node-cron");
 const path = require("path");
 const { fetchAll, fetchStatus } = require("./fetcher");
-const { getArticles, getCategories, getStats, getTrending, getRelated, getTopClusters } = require("./db");
+const { fetchRiskSignals } = require("./risk");
+const { getArticles, getCategories, getStats, getTrending, getRelated, getTopClusters, getRiskSignals } = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,6 +72,15 @@ app.get("/api/articles/:id/related", (req, res) => {
   }
 });
 
+// GET /api/risk-signals  – OSINT risk signals
+app.get("/api/risk-signals", (req, res) => {
+  try {
+    res.json(getRiskSignals());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/fetch-status  – current fetch progress
 app.get("/api/fetch-status", (req, res) => {
   res.json(fetchStatus);
@@ -87,15 +97,22 @@ app.post("/api/fetch", async (req, res) => {
 });
 
 // ── Scheduler ───────────────────────────────────────────────────────────────
-// Fetch every 30 minutes
+// Fetch RSS every 30 minutes
 cron.schedule("*/30 * * * *", () => {
   console.log("[cron] Scheduled fetch triggered");
   fetchAll().catch(console.error);
 });
 
+// Fetch OSINT risk signals every hour
+cron.schedule("0 * * * *", () => {
+  console.log("[cron] Risk signals fetch triggered");
+  fetchRiskSignals().catch(console.error);
+});
+
 // ── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`\n🌍  WorldVibes RSS Aggregator running at http://localhost:${PORT}\n`);
-  // Initial fetch on startup
+  // Initial fetches on startup
   fetchAll().catch(console.error);
+  fetchRiskSignals().catch(console.error);
 });

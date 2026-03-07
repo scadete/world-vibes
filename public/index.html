@@ -241,6 +241,37 @@
     .fetch-status-bar.visible { display: block; }
 
     /* ── Highlights ── */
+    /* ── Risk Signals ── */
+    .risk-section { margin-bottom: 1.25rem; }
+    .risk-list { display: flex; flex-direction: column; }
+    .risk-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.6rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      padding: 0.3rem 0;
+      border-bottom: 1px solid var(--border);
+      transition: color 0.1s;
+    }
+    .risk-item:hover { color: var(--accent); }
+    .risk-badge {
+      font-size: 0.67rem;
+      font-weight: 700;
+      padding: 0.1rem 0.3rem;
+      white-space: nowrap;
+      border: 1px solid;
+      flex-shrink: 0;
+      margin-top: 0.05rem;
+    }
+    .risk-badge.CRÍTICO { color: var(--danger);  border-color: var(--danger); }
+    .risk-badge.ALTO    { color: #ff8800;         border-color: #ff8800; }
+    .risk-badge.MÉDIO   { color: var(--accent2);  border-color: var(--accent2); }
+    .risk-badge.BAIXO   { color: var(--text-muted); border-color: var(--text-muted); }
+    .risk-title { line-height: 1.3; }
+    .risk-meta  { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem; }
+    .risk-empty { font-size: 0.78rem; color: var(--text-muted); padding: 0.4rem 0; }
+
     .highlights-section { margin-bottom: 1.25rem; }
     .no-highlights {
       font-size: 0.78rem;
@@ -470,6 +501,12 @@
   <!-- System stats -->
   <h2 class="section-title">System Status</h2>
   <div class="stats-bar" id="statsBar">initializing...</div>
+
+  <!-- OSINT Risk Signals -->
+  <h2 class="section-title">Sinais de Risco OSINT</h2>
+  <div class="risk-section" id="riskSection">
+    <div class="risk-list" id="riskList"><div class="risk-empty">[ aguardando dados OSINT... ]</div></div>
+  </div>
 
   <!-- Trending Topics -->
   <div class="trending-section" id="trendingSection" style="display:none">
@@ -715,6 +752,43 @@
     } catch { /* ignore */ }
   }
 
+  // ── Risk signals ────────────────────────────────────────────────────────────
+  function relativeTime(isoStr) {
+    if (!isoStr) return '—';
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const h = Math.floor(diff / 3600000);
+    if (h < 1)  return 'há menos de 1h';
+    if (h < 24) return `há ${h}h`;
+    const d = Math.floor(h / 24);
+    return `há ${d}d`;
+  }
+
+  async function loadRiskSignals() {
+    const list = document.getElementById('riskList');
+    try {
+      const data = await (await fetch('/api/risk-signals')).json();
+      if (!data.length) {
+        list.innerHTML = '<div class="risk-empty">[ nenhum sinal de risco detectado nas últimas 72h ]</div>';
+        return;
+      }
+      list.innerHTML = '';
+      data.forEach(sig => {
+        const item = document.createElement('div');
+        item.className = 'risk-item';
+        item.innerHTML = `
+          <span class="risk-badge ${escHtml(sig.level)}">[${escHtml(sig.level)}]</span>
+          <div>
+            <div class="risk-title">${escHtml(sig.title)}</div>
+            <div class="risk-meta">${escHtml(sig.source)} · ${escHtml(sig.location || '—')} · ${relativeTime(sig.event_at)}</div>
+          </div>`;
+        if (sig.url) item.addEventListener('click', () => window.open(sig.url, '_blank'));
+        list.appendChild(item);
+      });
+    } catch {
+      list.innerHTML = '<div class="risk-empty">[ erro ao carregar sinais OSINT ]</div>';
+    }
+  }
+
   // ── Clusters ────────────────────────────────────────────────────────────────
   async function loadClusters() {
     const section = document.getElementById('highlightsSection');
@@ -816,7 +890,7 @@
           _stopFetchPoll();
           const saved = s.totalSaved;
           bar.textContent = `[ concluído — ${saved} novo${saved !== 1 ? 's' : ''} artigo${saved !== 1 ? 's' : ''} ]`;
-          await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters()]);
+          await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters(), loadRiskSignals()]);
           toast(`[ feeds actualizados — ${saved} novo${saved !== 1 ? 's' : ''} ]`);
           btn.disabled = false;
           btn.textContent = '[↻] Refresh';
@@ -836,6 +910,7 @@
     loadStats(),
     loadTrending(),
     loadClusters(),
+    loadRiskSignals(),
   ]);
 
   // ── PWA — apple-touch-icon via canvas (iOS) ──────────────────────────────
