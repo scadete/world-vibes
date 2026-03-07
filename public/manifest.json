@@ -1,0 +1,13 @@
+{
+  "name": "WorldVibes",
+  "short_name": "WorldVibes",
+  "description": "RSS News Aggregator — stay updated with world news",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#6c8ef7",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>WorldVibes – RSS News Aggregator</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <meta name="theme-color" content="#6c8ef7" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="WorldVibes" />
   <style>
     :root {
       --bg: #0f1117;
@@ -429,6 +436,7 @@
       <input id="searchInput" type="search" placeholder="Search news…" />
       <button onclick="applySearch()">🔍</button>
     </div>
+    <button class="btn" id="installBtn" style="display:none" onclick="installApp()">⬇ Instalar App</button>
     <button class="btn btn-fetch" id="fetchBtn" onclick="triggerFetch()">↻ Refresh feeds</button>
     <button class="btn-clear" id="clearFiltersBtn" onclick="clearFilters()">✕ Limpar filtros</button>
   </div>
@@ -755,6 +763,48 @@
     await Promise.all([loadCategories(), loadStats(), loadTrending(), loadClusters()]);
     await loadArticles();
   })();
+
+  // ── PWA — apple-touch-icon via canvas (iOS) ──────────────────────────────
+  (function () {
+    const c = document.createElement('canvas');
+    c.width = c.height = 180;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0f1117';
+    ctx.fillRect(0, 0, 180, 180);
+    ctx.fillStyle = '#6c8ef7';
+    ctx.font = 'bold 120px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('W', 90, 95);
+    const link = document.createElement('link');
+    link.rel = 'apple-touch-icon';
+    link.href = c.toDataURL('image/png');
+    document.head.appendChild(link);
+  })();
+
+  // ── PWA — Install prompt (Android / Desktop Chrome) ──────────────────────
+  let _installPrompt = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _installPrompt = e;
+    document.getElementById('installBtn').style.display = '';
+  });
+  window.addEventListener('appinstalled', () => {
+    document.getElementById('installBtn').style.display = 'none';
+    _installPrompt = null;
+    toast('✓ WorldVibes instalado!');
+  });
+  async function installApp() {
+    if (!_installPrompt) return;
+    _installPrompt.prompt();
+    const { outcome } = await _installPrompt.userChoice;
+    if (outcome === 'accepted') _installPrompt = null;
+  }
+
+  // ── PWA — Service Worker registration ────────────────────────────────────
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
 </script>
 </body>
 </html>
