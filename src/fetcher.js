@@ -16,6 +16,17 @@ const parser = new Parser({
   },
 });
 
+// ── Fetch status (exported for /api/fetch-status) ────────────────────────────
+const fetchStatus = {
+  running: false,
+  phase: "",        // 'fetching' | 'embedding' | ''
+  done: 0,
+  total: 0,
+  currentFeed: "",
+  totalSaved: 0,
+  errors: 0,
+};
+
 function sanitize(str) {
   if (!str) return null;
   // Strip HTML tags for description preview
@@ -49,14 +60,38 @@ async function fetchFeed(feed) {
 
 async function fetchAll() {
   console.log(`\n[WorldVibes] Fetching ${FEEDS.length} RSS feeds…\n`);
-  const results = await Promise.allSettled(FEEDS.map(fetchFeed));
+
+  fetchStatus.running = true;
+  fetchStatus.phase = "fetching";
+  fetchStatus.done = 0;
+  fetchStatus.total = FEEDS.length;
+  fetchStatus.currentFeed = "";
+  fetchStatus.totalSaved = 0;
+  fetchStatus.errors = 0;
+
+  const results = await Promise.allSettled(
+    FEEDS.map(async (feed) => {
+      fetchStatus.currentFeed = feed.name;
+      const result = await fetchFeed(feed);
+      fetchStatus.done++;
+      if (result.error) fetchStatus.errors++;
+      fetchStatus.totalSaved += result.saved || 0;
+      return result;
+    })
+  );
 
   const summary = results.map((r) => (r.status === "fulfilled" ? r.value : { error: r.reason }));
   const totalSaved = summary.reduce((acc, r) => acc + (r.saved || 0), 0);
   console.log(`\n[WorldVibes] Done. ${totalSaved} new articles saved.\n`);
 
   // Compute embeddings and run semantic clustering for new articles
+  fetchStatus.phase = "embedding";
+  fetchStatus.currentFeed = "";
   await embedAndCluster();
+
+  fetchStatus.running = false;
+  fetchStatus.phase = "";
+  fetchStatus.currentFeed = "";
 
   return summary;
 }
@@ -66,4 +101,4 @@ if (require.main === module) {
   fetchAll().catch(console.error);
 }
 
-module.exports = { fetchAll, fetchFeed };
+module.exports = { fetchAll, fetchFeed, fetchStatus };

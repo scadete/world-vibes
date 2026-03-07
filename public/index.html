@@ -229,8 +229,24 @@
     }
     .trending-tag:hover { border-color: var(--accent); color: var(--accent); }
 
+    /* ── Fetch status bar ── */
+    .fetch-status-bar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0.35rem 1.5rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: none;
+    }
+    .fetch-status-bar.visible { display: block; }
+
     /* ── Highlights ── */
     .highlights-section { margin-bottom: 1.25rem; }
+    .no-highlights {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      padding: 0.4rem 0;
+    }
     .highlights-list {
       display: flex;
       flex-direction: column;
@@ -447,6 +463,7 @@
     <button class="btn-clear" id="clearFiltersBtn" onclick="clearFilters()">[x] Clear</button>
   </div>
 </header>
+<div class="fetch-status-bar" id="fetchStatusBar"></div>
 
 <div class="container">
 
@@ -700,10 +717,15 @@
 
   // ── Clusters ────────────────────────────────────────────────────────────────
   async function loadClusters() {
+    const section = document.getElementById('highlightsSection');
+    const list = document.getElementById('highlightsList');
+    section.style.display = 'block';
     try {
       const data = await (await fetch('/api/clusters?limit=6')).json();
-      if (!data.length) return;
-      const list = document.getElementById('highlightsList');
+      if (!data.length) {
+        list.innerHTML = '<div class="no-highlights">[ nenhum destaque identificado — aguardando múltiplos veículos sobre o mesmo tema ]</div>';
+        return;
+      }
       list.innerHTML = '';
       data.forEach(cluster => {
         const item = document.createElement('div');
@@ -727,8 +749,9 @@
         }
         list.appendChild(item);
       });
-      document.getElementById('highlightsSection').style.display = 'block';
-    } catch { /* ignore */ }
+    } catch {
+      list.innerHTML = '<div class="no-highlights">[ erro ao carregar destaques ]</div>';
+    }
   }
 
   // ── Trending ────────────────────────────────────────────────────────────────
@@ -756,24 +779,53 @@
   }
 
   // ── Manual fetch ────────────────────────────────────────────────────────────
+  let _fetchPollInterval = null;
+
+  function _stopFetchPoll() {
+    if (_fetchPollInterval) { clearInterval(_fetchPollInterval); _fetchPollInterval = null; }
+  }
+
   async function triggerFetch() {
     const btn = document.getElementById('fetchBtn');
+    const bar = document.getElementById('fetchStatusBar');
     btn.disabled = true;
-    btn.textContent = '[↻] fetching...';
-    toast('[ downloading RSS feeds... ]');
+    bar.classList.add('visible');
+
     try {
       await fetch('/api/fetch', { method: 'POST' });
-      setTimeout(async () => {
-        await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters()]);
-        toast('[ feeds actualizados ]');
-        btn.disabled = false;
-        btn.textContent = '[↻] Refresh';
-      }, 3000);
     } catch {
-      toast('[ erro ao actualizar ]');
+      toast('[ erro ao iniciar actualização ]');
       btn.disabled = false;
-      btn.textContent = '[↻] Refresh';
+      bar.classList.remove('visible');
+      return;
     }
+
+    _stopFetchPoll();
+    _fetchPollInterval = setInterval(async () => {
+      try {
+        const s = await (await fetch('/api/fetch-status')).json();
+
+        if (s.phase === 'fetching') {
+          const feed = s.currentFeed ? ` — ${s.currentFeed}` : '';
+          btn.textContent = `[↻] feeds... (${s.done}/${s.total})`;
+          bar.textContent = `[ a descarregar feeds... (${s.done}/${s.total})${feed} ]`;
+        } else if (s.phase === 'embedding') {
+          btn.textContent = '[↻] analisando...';
+          bar.textContent = '[ a calcular similaridades semânticas... ]';
+        } else if (!s.running) {
+          _stopFetchPoll();
+          const saved = s.totalSaved;
+          bar.textContent = `[ concluído — ${saved} novo${saved !== 1 ? 's' : ''} artigo${saved !== 1 ? 's' : ''} ]`;
+          await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters()]);
+          toast(`[ feeds actualizados — ${saved} novo${saved !== 1 ? 's' : ''} ]`);
+          btn.disabled = false;
+          btn.textContent = '[↻] Refresh';
+          setTimeout(() => bar.classList.remove('visible'), 4000);
+        }
+      } catch {
+        // network hiccup — keep polling
+      }
+    }, 1000);
   }
 
   // ── Init — articles first, everything else in parallel ──────────────────────

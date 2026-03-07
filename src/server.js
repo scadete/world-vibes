@@ -1,7 +1,7 @@
 const express = require("express");
 const cron = require("node-cron");
 const path = require("path");
-const { fetchAll } = require("./fetcher");
+const { fetchAll, fetchStatus } = require("./fetcher");
 const { getArticles, getCategories, getStats, getTrending, getRelated, getTopClusters } = require("./db");
 
 const app = express();
@@ -69,6 +69,11 @@ app.get("/api/articles/:id/related", (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/fetch-status  – current fetch progress
+app.get("/api/fetch-status", (req, res) => {
+  res.json(fetchStatus);
 });
 
 // POST /api/fetch  – trigger manual fetch
