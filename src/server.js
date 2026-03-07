@@ -14,13 +14,13 @@ app.use(express.json());
 
 // GET /api/articles?category=&language=&search=&sort=&limit=&offset=
 app.get("/api/articles", (req, res) => {
-  const { category, language, search, sort, limit = 50, offset = 0 } = req.query;
+  const { category, language, search, hours, limit = 50, offset = 0 } = req.query;
   try {
     const articles = getArticles({
       category,
       language,
       search,
-      sort,
+      hours: hours ? Math.min(parseInt(hours) || 48, 8760) : undefined,
       limit: Math.min(parseInt(limit) || 50, 200),
       offset: parseInt(offset) || 0,
     });

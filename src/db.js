@@ -266,8 +266,9 @@ function toFTSQuery(q) {
 
 // ── Get articles ──────────────────────────────────────────────────────────────
 
-function getArticles({ category, language, search, limit = 50, offset = 0 } = {}) {
+function getArticles({ category, language, search, hours, limit = 50, offset = 0 } = {}) {
   const params = [];
+  const since = hours ? new Date(Date.now() - hours * 3600000).toISOString() : null;
 
   if (search) {
     const ftsQuery = toFTSQuery(search);
@@ -282,6 +283,10 @@ function getArticles({ category, language, search, limit = 50, offset = 0 } = {}
     `;
     params.push(ftsQuery);
 
+    if (since) {
+      query += " AND a.pub_date >= ?";
+      params.push(since);
+    }
     if (category && category !== "all") {
       query += " AND a.category = ?";
       params.push(category);
@@ -310,6 +315,10 @@ function getArticles({ category, language, search, limit = 50, offset = 0 } = {}
     WHERE 1=1
   `;
 
+  if (since) {
+    query += " AND a.pub_date >= ?";
+    params.push(since);
+  }
   if (category && category !== "all") {
     query += " AND a.category = ?";
     params.push(category);
