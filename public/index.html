@@ -270,7 +270,36 @@
     .risk-badge.BAIXO   { color: var(--text-muted); border-color: var(--text-muted); }
     .risk-title { line-height: 1.3; }
     .risk-meta  { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem; }
-    .risk-empty { font-size: 0.78rem; color: var(--text-muted); padding: 0.4rem 0; }
+    .risk-empty { font-size: 0.78rem; color: var(--text-muted); padding: 0.25rem 0; }
+    .risk-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 0.5rem; }
+    .risk-sources-btn {
+      background: none; border: 1px solid var(--text-muted); color: var(--text-muted);
+      font-family: var(--font); font-size: 0.7rem; cursor: pointer; padding: 0.1rem 0.4rem;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .risk-sources-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Risk Modal ── */
+    .risk-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,9,0,0.88);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
+    }
+    .risk-modal-overlay.open { display: flex; }
+    .risk-modal {
+      background: var(--surface); border: 1px solid var(--accent2);
+      padding: 1rem 1.25rem; max-width: 540px; width: calc(100% - 2rem); font-size: 0.78rem;
+    }
+    .risk-modal-header, .risk-modal-footer { color: var(--accent2); font-size: 0.75rem; white-space: pre; }
+    .risk-modal-body { margin: 0.5rem 0; }
+    .risk-modal-row {
+      display: flex; gap: 0.5rem; padding: 0.25rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .risk-modal-row:last-child { border-bottom: none; }
+    .rm-source { color: var(--accent); width: 5.5rem; flex-shrink: 0; font-weight: bold; }
+    .rm-desc   { flex: 1; color: var(--text-muted); }
+    .rm-count  { color: var(--text); text-align: right; white-space: nowrap; }
+    .rm-meta   { color: var(--text-muted); font-style: italic; }
 
     .highlights-section { margin-bottom: 1.25rem; }
     .no-highlights {
@@ -503,7 +532,10 @@
   <div class="stats-bar" id="statsBar">initializing...</div>
 
   <!-- OSINT Risk Signals -->
-  <h2 class="section-title">Sinais de Risco OSINT</h2>
+  <div class="risk-header">
+    <h2 class="section-title" style="display:inline;margin-bottom:0">Sinais de Risco OSINT</h2>
+    <button class="risk-sources-btn" id="riskSourcesBtn" onclick="openRiskModal()">[ fontes ]</button>
+  </div>
   <div class="risk-section" id="riskSection">
     <div class="risk-list" id="riskList"><div class="risk-empty">[ aguardando dados OSINT... ]</div></div>
   </div>
@@ -763,16 +795,59 @@
     return `há ${d}d`;
   }
 
+  // ── Risk modal ────────────────────────────────────────────────────────────────
+  let _riskMeta = null;
+
+  function openRiskModal() {
+    const overlay = document.getElementById('riskModalOverlay');
+    if (_riskMeta) renderRiskModal(_riskMeta);
+    overlay.classList.add('open');
+  }
+  function closeRiskModal() {
+    document.getElementById('riskModalOverlay').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRiskModal(); });
+
+  function renderRiskModal(meta) {
+    const body = document.getElementById('riskModalBody');
+    const since = meta.last_fetch ? relativeTime(meta.last_fetch) : '—';
+    const rows = (meta.sources || []).map(s => {
+      const n = s.signal_count || 0;
+      const label = n === 1 ? '1 sinal' : `${n} sinais`;
+      const when = s.last_fetched_at ? relativeTime(s.last_fetched_at) : 'nunca';
+      return `<div class="risk-modal-row">
+        <span class="rm-source">${escHtml(s.source)}</span>
+        <span class="rm-desc">${escHtml(s.description)}</span>
+        <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
+      </div>`;
+    }).join('');
+    body.innerHTML = `
+      <div class="risk-modal-row" style="color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.4rem;margin-bottom:0.2rem">
+        última consulta: ${since}
+      </div>${rows}`;
+  }
+
   async function loadRiskSignals() {
     const list = document.getElementById('riskList');
     try {
-      const data = await (await fetch('/api/risk-signals')).json();
-      if (!data.length) {
-        list.innerHTML = '<div class="risk-empty">[ nenhum sinal de risco detectado nas últimas 72h ]</div>';
+      const resp = await (await fetch('/api/risk-signals')).json();
+      // Handle both old (array) and new ({ signals, meta }) format
+      const signals = Array.isArray(resp) ? resp : (resp.signals || []);
+      const meta    = Array.isArray(resp) ? null  : (resp.meta || null);
+
+      _riskMeta = meta;
+
+      if (!signals.length) {
+        const sourceNames = meta ? (meta.sources || []).map(s => s.source).join(' · ') : '—';
+        const since = (meta && meta.last_fetch) ? relativeTime(meta.last_fetch) : '—';
+        list.innerHTML = `
+          <div class="risk-empty">[ nenhum sinal detectado nas últimas 72h ]</div>
+          <div class="risk-empty" style="margin-top:0.2rem">fontes consultadas ${since}: ${escHtml(sourceNames)}</div>`;
         return;
       }
+
       list.innerHTML = '';
-      data.forEach(sig => {
+      signals.forEach(sig => {
         const item = document.createElement('div');
         item.className = 'risk-item';
         item.innerHTML = `
@@ -784,7 +859,7 @@
         if (sig.url) item.addEventListener('click', () => window.open(sig.url, '_blank'));
         list.appendChild(item);
       });
-    } catch {
+    } catch (err) {
       list.innerHTML = '<div class="risk-empty">[ erro ao carregar sinais OSINT ]</div>';
     }
   }
@@ -955,5 +1030,14 @@
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 </script>
+
+<!-- OSINT Sources Modal -->
+<div class="risk-modal-overlay" id="riskModalOverlay" onclick="closeRiskModal()">
+  <div class="risk-modal" onclick="event.stopPropagation()">
+    <div class="risk-modal-header">╔═ FONTES OSINT CONSULTADAS ══════════════════════════════╗</div>
+    <div class="risk-modal-body" id="riskModalBody">[ a carregar... ]</div>
+    <div class="risk-modal-footer">╚═ [Esc] Fechar ══════════════════════════════════════════╝</div>
+  </div>
+</div>
 </body>
 </html>

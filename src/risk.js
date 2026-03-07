@@ -13,6 +13,17 @@ const parser = new Parser({
   },
 });
 
+// ── Source registry ───────────────────────────────────────────────────────────
+
+const SOURCE_META = [
+  { source: "GDACS",     category: "disaster",     description: "Desastres naturais (GDACS/UN-OCHA)" },
+  { source: "WHO",       category: "health",        description: "Surtos de doenças (OMS)" },
+  { source: "ReliefWeb", category: "humanitarian",  description: "Crises humanitárias (OCHA)" },
+  { source: "IODA",      category: "internet",      description: "Interrupções de internet (Georgia Tech)" },
+  { source: "USGS",      category: "seismic",       description: "Actividade sísmica (USGS)" },
+  { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
+];
+
 // ── Level helpers ─────────────────────────────────────────────────────────────
 
 function scoreToLevel(score) {
@@ -38,7 +49,6 @@ async function fetchGDACS() {
   return feed.items.map((item) => {
     const levelStr = (item.alertlevel || "green").toLowerCase();
     const score = levelStr === "red" ? 4 : levelStr === "orange" ? 3 : 2;
-    const eventtype = item.eventtype || "Event";
     const country = item.gdacsCountry || "";
     return {
       guid: `gdacs-${item.guid || item.link || item.title}`,
@@ -62,7 +72,6 @@ async function fetchWHO() {
     "https://www.who.int/feeds/entity/csr/don/en/rss.xml"
   );
   return feed.items.map((item) => {
-    // Extract country from title (usually "Disease — Country")
     const title = item.title || "Disease alert";
     const location = title.includes("—")
       ? title.split("—").pop().trim()
@@ -127,7 +136,7 @@ async function fetchReliefWeb() {
 
 async function fetchIODA() {
   const now = Math.floor(Date.now() / 1000);
-  const from = now - 48 * 3600; // last 48 hours
+  const from = now - 48 * 3600;
   const url =
     `https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts` +
     `?from=${from}&until=${now}&entityType=country`;
@@ -159,30 +168,112 @@ async function fetchIODA() {
     });
 }
 
+// ── USGS — Significant earthquakes ───────────────────────────────────────────
+
+async function fetchUSGS() {
+  const url =
+    "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.geojson";
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const json = await res.json();
+
+  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
+  return (json.features || [])
+    .filter((f) => f.properties.time >= cutoff)
+    .map((f) => {
+      const p = f.properties;
+      // PAGER alert takes precedence, then magnitude
+      const alertStr = (p.alert || "").toLowerCase();
+      let score;
+      if (alertStr === "red")    score = 4;
+      else if (alertStr === "orange") score = 3;
+      else if (alertStr === "yellow") score = 2;
+      else {
+        const mag = p.mag || 0;
+        score = mag >= 7.5 ? 4 : mag >= 6.5 ? 3 : mag >= 5.5 ? 2 : 1;
+      }
+      const mag = p.mag ? `M${p.mag.toFixed(1)}` : "";
+      const place = p.place || "Unknown region";
+      return {
+        guid: `usgs-${f.id || p.time}`,
+        source: "USGS",
+        category: "seismic",
+        title: `Terremoto ${mag} — ${place}`,
+        description: p.type || null,
+        level: scoreToLevel(score),
+        score,
+        url: p.url || null,
+        location: place,
+        event_at: safeDate(p.time ? new Date(p.time).toISOString() : null),
+      };
+    });
+}
+
+// ── NOAA — Space weather alerts ───────────────────────────────────────────────
+
+async function fetchNOAA() {
+  const url = "https://services.swpc.noaa.gov/products/alerts.json";
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const json = await res.json();
+
+  const cutoff = Date.now() - 48 * 3600 * 1000;
+  return (Array.isArray(json) ? json : [])
+    .filter((a) => {
+      if (!a.issue_datetime) return false;
+      return new Date(a.issue_datetime + "Z").getTime() >= cutoff;
+    })
+    .map((a, idx) => {
+      const msg = a.message || "";
+      // Extract product line (first non-empty line is usually the header)
+      const lines = msg.split("\n").map((l) => l.trim()).filter(Boolean);
+      const productLine = lines[0] || "Space Weather Alert";
+
+      // Score from geomagnetic storm level (G1-G5), solar flare class, radiation storm (S1-S5)
+      let score = 2;
+      const gMatch = msg.match(/G(\d)/);
+      const xMatch = /X-class|X[0-9]/i.test(msg);
+      const mMatch = /M-class|M[0-9]/i.test(msg);
+      const sMatch = msg.match(/S(\d)/);
+      if (xMatch || (gMatch && parseInt(gMatch[1]) >= 4) || (sMatch && parseInt(sMatch[1]) >= 4)) score = 4;
+      else if (mMatch || (gMatch && parseInt(gMatch[1]) >= 3) || (sMatch && parseInt(sMatch[1]) >= 3)) score = 3;
+      else if (gMatch || sMatch) score = 2;
+
+      return {
+        guid: `noaa-${a.issue_datetime || idx}`,
+        source: "NOAA",
+        category: "space",
+        title: productLine,
+        description: lines.slice(1, 3).join(" ").slice(0, 300) || null,
+        level: scoreToLevel(score),
+        score,
+        url: "https://www.swpc.noaa.gov/products/alerts-watches-and-warnings",
+        location: "Clima Espacial Global",
+        event_at: safeDate(a.issue_datetime ? a.issue_datetime + "Z" : null),
+      };
+    });
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function fetchRiskSignals() {
   console.log("[risk] Fetching OSINT risk signals…");
-  const results = await Promise.allSettled([
-    fetchGDACS(),
-    fetchWHO(),
-    fetchReliefWeb(),
-    fetchIODA(),
-  ]);
+  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA];
+  const results = await Promise.allSettled(fetchers.map((f) => f()));
 
-  const signals = results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => r.value);
+  const signals = [];
+  const logEntries = [];
 
   results.forEach((r, i) => {
-    const names = ["GDACS", "WHO", "ReliefWeb", "IODA"];
+    const meta = SOURCE_META[i];
+    const items = r.status === "fulfilled" ? r.value : [];
+    signals.push(...items);
+    logEntries.push({ ...meta, signal_count: items.length });
     if (r.status === "rejected") {
-      console.error(`[risk] ${names[i]} failed: ${r.reason?.message || r.reason}`);
+      console.error(`[risk] ${meta.source} failed: ${r.reason?.message || r.reason}`);
     }
   });
 
-  saveRiskSignals(signals);
-  console.log(`[risk] ${signals.length} signals saved.`);
+  saveRiskSignals(signals, logEntries);
+  console.log(`[risk] ${signals.length} signals saved across ${SOURCE_META.length} sources.`);
   return signals;
 }
 

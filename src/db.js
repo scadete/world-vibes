@@ -68,6 +68,14 @@ db.exec(`
     fetched_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_risk_score ON risk_signals(score DESC, event_at DESC);
+
+  CREATE TABLE IF NOT EXISTS risk_fetch_log (
+    source          TEXT PRIMARY KEY,
+    category        TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    last_fetched_at TEXT,
+    signal_count    INTEGER NOT NULL DEFAULT 0
+  );
 `);
 
 // Add cluster_id column to articles if not yet present (idempotent migration)
@@ -490,21 +498,49 @@ const insertRiskSignal = db.prepare(`
     (@guid, @source, @category, @title, @description, @level, @score, @url, @location, @event_at)
 `);
 
-function saveRiskSignals(signals) {
-  const insert = db.transaction((rows) => {
-    for (const s of rows) insertRiskSignal(s);
+const upsertFetchLog = db.prepare(`
+  INSERT INTO risk_fetch_log (source, category, description, last_fetched_at, signal_count)
+  VALUES (@source, @category, @description, @last_fetched_at, @signal_count)
+  ON CONFLICT(source) DO UPDATE SET
+    category        = excluded.category,
+    description     = excluded.description,
+    last_fetched_at = excluded.last_fetched_at,
+    signal_count    = excluded.signal_count
+`);
+
+function saveRiskSignals(signals, logEntries = []) {
+  const run = db.transaction(() => {
+    for (const s of signals) insertRiskSignal(s);
+    const now = new Date().toISOString();
+    for (const e of logEntries) {
+      upsertFetchLog({ ...e, last_fetched_at: now });
+    }
   });
-  insert(signals);
+  run();
 }
 
 function getRiskSignals(limit = 30) {
-  return db.prepare(`
+  const signals = db.prepare(`
     SELECT * FROM risk_signals
     WHERE event_at >= datetime('now', '-72 hours')
        OR fetched_at >= datetime('now', '-24 hours')
     ORDER BY score DESC, event_at DESC
     LIMIT ?
   `).all(limit);
+
+  const sources = db.prepare(
+    "SELECT * FROM risk_fetch_log ORDER BY source ASC"
+  ).all();
+
+  const lastFetch = sources.reduce((max, s) => {
+    if (!s.last_fetched_at) return max;
+    return !max || s.last_fetched_at > max ? s.last_fetched_at : max;
+  }, null);
+
+  return {
+    signals,
+    meta: { last_fetch: lastFetch, sources },
+  };
 }
 
 module.exports = {
