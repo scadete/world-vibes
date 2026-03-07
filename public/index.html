@@ -534,6 +534,7 @@
   <!-- OSINT Risk Signals -->
   <div class="risk-header">
     <h2 class="section-title" style="display:inline;margin-bottom:0">Sinais de Risco OSINT</h2>
+    <button class="risk-sources-btn" id="riskRefreshBtn" onclick="refreshRiskSignals()">[ atualizar ]</button>
     <button class="risk-sources-btn" id="riskSourcesBtn" onclick="openRiskModal()">[ fontes ]</button>
   </div>
   <div class="risk-section" id="riskSection">
@@ -793,6 +794,21 @@
     if (h < 24) return `há ${h}h`;
     const d = Math.floor(h / 24);
     return `há ${d}d`;
+  }
+
+  // ── Risk refresh ─────────────────────────────────────────────────────────────
+  async function refreshRiskSignals() {
+    const btn = document.getElementById('riskRefreshBtn');
+    btn.textContent = '[ ... ]';
+    btn.disabled = true;
+    try {
+      await fetch('/api/fetch-risk', { method: 'POST' });
+      await loadRiskSignals();
+    } catch { /* ignore network errors */ }
+    finally {
+      btn.textContent = '[ atualizar ]';
+      btn.disabled = false;
+    }
   }
 
   // ── Risk modal ────────────────────────────────────────────────────────────────

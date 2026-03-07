@@ -81,6 +81,16 @@ app.get("/api/risk-signals", (req, res) => {
   }
 });
 
+// POST /api/fetch-risk  – manually trigger OSINT risk signals fetch (awaits completion)
+app.post("/api/fetch-risk", async (req, res) => {
+  try {
+    await fetchRiskSignals();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/fetch-status  – current fetch progress
 app.get("/api/fetch-status", (req, res) => {
   res.json(fetchStatus);

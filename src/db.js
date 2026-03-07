@@ -78,6 +78,22 @@ db.exec(`
   );
 `);
 
+// Pre-seed risk_fetch_log so the modal always shows all sources, even before first fetch
+try {
+  const _osintSources = [
+    { source: "GDACS",     category: "disaster",    description: "Desastres naturais (GDACS/UN-OCHA)" },
+    { source: "WHO",       category: "health",       description: "Surtos de doenças (OMS)" },
+    { source: "ReliefWeb", category: "humanitarian", description: "Crises humanitárias (OCHA)" },
+    { source: "IODA",      category: "internet",     description: "Interrupções de internet (Georgia Tech)" },
+    { source: "USGS",      category: "seismic",      description: "Actividade sísmica (USGS)" },
+    { source: "NOAA",      category: "space",        description: "Clima espacial (NOAA/SWPC)" },
+  ];
+  const _seedStmt = db.prepare(
+    "INSERT OR IGNORE INTO risk_fetch_log (source, category, description, signal_count) VALUES (@source, @category, @description, 0)"
+  );
+  db.transaction(() => { for (const s of _osintSources) _seedStmt.run(s); })();
+} catch { /* non-fatal: table might not exist yet on very first run */ }
+
 // Add cluster_id column to articles if not yet present (idempotent migration)
 try {
   db.exec("ALTER TABLE articles ADD COLUMN cluster_id INTEGER REFERENCES clusters(id)");
