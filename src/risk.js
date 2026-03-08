@@ -23,6 +23,7 @@ const SOURCE_META = [
   { source: "USGS",      category: "seismic",       description: "Actividade sísmica (USGS)" },
   { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
   { source: "FOREX",     category: "economic",      description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
+  { source: "DOOMSDAY",  category: "geopolitical",  description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
 ];
 
 // ── Level helpers ─────────────────────────────────────────────────────────────
@@ -320,11 +321,88 @@ async function fetchForex() {
     .filter(Boolean);
 }
 
+// ── Doomsday Clock — Bulletin of Atomic Scientists ───────────────────────────
+// Updated manually each January when BAS announces the new setting.
+// Current: 89 seconds to midnight (Jan 2025) — the closest ever recorded.
+
+const DOOMSDAY_HISTORY = [
+  { year: 2020, seconds: 120 },
+  { year: 2023, seconds: 90 },
+  { year: 2024, seconds: 90 },
+  { year: 2025, seconds: 89 }, // record — closest to midnight in history
+];
+
+async function fetchDoomsday() {
+  const current = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 1];
+  const prev    = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 2];
+  const s = current.seconds;
+  const score = s < 60 ? 4 : s < 120 ? 3 : s < 180 ? 2 : 1;
+
+  let trend = "";
+  if (prev) {
+    if (s < prev.seconds)      trend = ` ▼ -${prev.seconds - s}s vs ${prev.year}`;
+    else if (s > prev.seconds) trend = ` ▲ +${s - prev.seconds}s vs ${prev.year}`;
+    else                       trend = ` = sem alteração vs ${prev.year}`;
+  }
+
+  return [{
+    guid:        `doomsday-${current.year}`,
+    source:      "DOOMSDAY",
+    category:    "geopolitical",
+    title:       `Relógio do Apocalipse: ${s}s até à meia-noite (${current.year})${trend}`,
+    description: "Boletim dos Cientistas Atómicos — avaliação anual do risco existencial global",
+    level:       scoreToLevel(score),
+    score,
+    url:         "https://thebulletin.org/doomsday-clock/",
+    location:    "Global",
+    event_at:    safeDate(`${current.year}-01-15T00:00:00Z`),
+  }];
+}
+
+// ── Pentagon Pizza Index — composite geopolitical stress ──────────────────────
+// Informal indicator: when pizza deliveries to the Pentagon spike at odd hours,
+// it correlates with active crisis response. Here we synthesise all OSINT sources
+// into a single 0-5 slice stress score.
+
+function computePizzaIndex(signals) {
+  const criticos = signals.filter((s) => s.score >= 4).length;
+  const altos    = signals.filter((s) => s.score === 3).length;
+  const medios   = signals.filter((s) => s.score === 2).length;
+
+  // Each CRÍTICO = 2pts, ALTO = 1pt, MÉDIO = 0.5pt
+  const pts    = criticos * 2 + altos + medios * 0.5;
+  const slices = Math.min(5, Math.round(pts));
+
+  const [label, desc] =
+    slices === 0 ? ["×0 — linha base",      "sem sinais relevantes activos"] :
+    slices === 1 ? ["×1 — pré-alerta",      `${signals.length} sinal(is) de baixa intensidade`] :
+    slices === 2 ? ["×2 — tensão moderada", `${altos} alerta(s) alto(s), ${medios} médio(s)`] :
+    slices === 3 ? ["×3 — meia pizza",      `${criticos} alerta(s) crítico(s) activo(s)`] :
+    slices === 4 ? ["×4 — crise activa",    "múltiplos alertas críticos — resposta em curso"] :
+                   ["×5 — caos total",      "todos os níveis de alerta activos simultaneamente"];
+
+  const score = slices === 0 ? 1 : slices <= 2 ? 2 : slices <= 3 ? 3 : 4;
+  const today = new Date().toISOString().split("T")[0];
+
+  return {
+    guid:        `pizza-${today}`,
+    source:      "PIZZA",
+    category:    "geopolitical",
+    title:       `🍕 Pentagon Pizza Index: ${label}`,
+    description: desc,
+    level:       scoreToLevel(score),
+    score,
+    url:         "https://en.wikipedia.org/wiki/Pentagon_pizza_index",
+    location:    "Global",
+    event_at:    new Date().toISOString(),
+  };
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function fetchRiskSignals() {
   console.log("[risk] Fetching OSINT risk signals…");
-  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA, fetchForex];
+  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA, fetchForex, fetchDoomsday];
   const results = await Promise.allSettled(fetchers.map((f) => f()));
 
   const signals = [];
@@ -340,8 +418,18 @@ async function fetchRiskSignals() {
     }
   });
 
+  // Pentagon Pizza Index — derived composite; always present, computed last
+  const pizzaSignal = computePizzaIndex(signals);
+  signals.push(pizzaSignal);
+  logEntries.push({
+    source:       "PIZZA",
+    category:     "geopolitical",
+    description:  "Pentagon Pizza Index — stress geopolítico composto",
+    signal_count: 1,
+  });
+
   saveRiskSignals(signals, logEntries);
-  console.log(`[risk] ${signals.length} signals saved across ${SOURCE_META.length} sources.`);
+  console.log(`[risk] ${signals.length} signals saved across ${SOURCE_META.length + 1} sources.`);
   return signals;
 }
 

@@ -88,6 +88,8 @@ try {
     { source: "USGS",      category: "seismic",      description: "Actividade sísmica (USGS)" },
     { source: "NOAA",      category: "space",        description: "Clima espacial (NOAA/SWPC)" },
     { source: "FOREX",     category: "economic",     description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
+    { source: "DOOMSDAY",  category: "geopolitical", description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
+    { source: "PIZZA",     category: "geopolitical", description: "Pentagon Pizza Index — stress geopolítico composto" },
   ];
   const _seedStmt = db.prepare(
     "INSERT OR IGNORE INTO risk_fetch_log (source, category, description, signal_count) VALUES (@source, @category, @description, 0)"
