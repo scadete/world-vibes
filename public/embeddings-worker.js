@@ -50,12 +50,13 @@ function cosineSim(a, b) {
 
 self.onmessage = async ({ data: { articles } }) => {
   try {
+    self.postMessage({ type: 'status', msg: 'A carregar biblioteca (CDN)…' });
     const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.esm.min.js');
 
+    self.postMessage({ type: 'status', msg: 'A abrir cache local…' });
     const db = await openDB();
 
-    self.postMessage({ type: 'status', msg: 'A carregar modelo semântico…' });
-
+    self.postMessage({ type: 'status', msg: 'A inicializar modelo…' });
     const pipe = await pipeline(
       'feature-extraction',
       'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
@@ -136,6 +137,6 @@ self.onmessage = async ({ data: { articles } }) => {
     self.postMessage({ type: 'clusters', data: clusters });
 
   } catch (err) {
-    self.postMessage({ type: 'error', msg: err.message });
+    self.postMessage({ type: 'error', msg: `${err.name}: ${err.message}` });
   }
 };

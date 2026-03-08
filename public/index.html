@@ -1031,8 +1031,8 @@
         } else if (msg.type === 'clusters') {
           renderClusters(msg.data);
         } else if (msg.type === 'error') {
-          list.innerHTML = '<div class="no-highlights">[ erro ao calcular destaques ]</div>';
-          console.warn('[clusters] worker error:', msg.msg);
+          list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ]</div>`;
+          console.error('[clusters] worker error:', msg.msg);
         }
       };
 
