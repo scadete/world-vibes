@@ -596,7 +596,17 @@
 
 <script>
   const PAGE_SIZE = 48;
-  let state = { category: 'all', language: 'all', search: '', offset: 0, loading: false };
+  // Restore persisted filters
+  const _savedState = JSON.parse(localStorage.getItem('wv-state') || '{}');
+  let state = {
+    category: _savedState.category || 'all',
+    language: _savedState.language || 'all',
+    search: '', offset: 0, loading: false
+  };
+
+  function persistState() {
+    localStorage.setItem('wv-state', JSON.stringify({ category: state.category, language: state.language }));
+  }
 
   // ── Utils ───────────────────────────────────────────────────────────────────
   function toast(msg, duration = 3000) {
@@ -747,6 +757,7 @@
     document.querySelectorAll('#langToolbar .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
     document.querySelectorAll('#catToolbar  .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
     updateClearBtn();
+    persistState();
     loadArticles();
   }
 
@@ -755,6 +766,7 @@
     btn.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     updateClearBtn();
+    persistState();
     loadArticles();
   }
 
@@ -768,18 +780,47 @@
   document.getElementById('searchInput').addEventListener('search', () => applySearch());
 
   // ── Categories ──────────────────────────────────────────────────────────────
+  function renderCatButtons(cats) {
+    const toolbar = document.getElementById('catToolbar');
+    // Remove any previously added category buttons (keep only "Todas")
+    [...toolbar.querySelectorAll('.btn:not(:first-child)')].forEach(b => b.remove());
+    cats.forEach(cat => {
+      const btn = document.createElement('button');
+      btn.className = 'btn' + (state.category === cat ? ' active' : '');
+      btn.textContent = cat;
+      btn.onclick = () => setFilter('category', cat, btn);
+      toolbar.appendChild(btn);
+    });
+    // Sync "Todas" active state
+    toolbar.querySelector('.btn').classList.toggle('active', state.category === 'all');
+  }
+
   async function loadCategories() {
-    try {
-      const cats = await (await fetch('/api/categories')).json();
-      const toolbar = document.getElementById('catToolbar');
-      cats.forEach(cat => {
-        const btn = document.createElement('button');
-        btn.className = 'btn';
-        btn.textContent = cat;
-        btn.onclick = () => setFilter('category', cat, btn);
-        toolbar.appendChild(btn);
-      });
-    } catch { /* ignore */ }
+    const LS_KEY = 'wv-cats', LS_TS = 'wv-cats-ts';
+    const TTL = 3600_000;
+    let cats = null;
+    try { cats = JSON.parse(localStorage.getItem(LS_KEY)); } catch {}
+    const ts = +localStorage.getItem(LS_TS) || 0;
+    const stale = Date.now() - ts > TTL;
+
+    if (cats) {
+      renderCatButtons(cats);
+      if (stale) {
+        // Background revalidation
+        fetch('/api/categories').then(r => r.json()).then(fresh => {
+          localStorage.setItem(LS_KEY, JSON.stringify(fresh));
+          localStorage.setItem(LS_TS, Date.now());
+          renderCatButtons(fresh);
+        }).catch(() => {});
+      }
+    } else {
+      try {
+        cats = await (await fetch('/api/categories')).json();
+        localStorage.setItem(LS_KEY, JSON.stringify(cats));
+        localStorage.setItem(LS_TS, Date.now());
+        renderCatButtons(cats);
+      } catch { /* ignore */ }
+    }
   }
 
   // ── Stats ───────────────────────────────────────────────────────────────────
@@ -1037,6 +1078,14 @@
       }
     }, 1000);
   }
+
+  // ── Init — restore active filter buttons from persisted state ───────────────
+  if (state.language !== 'all') {
+    document.querySelectorAll('#langToolbar .btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('onclick')?.includes(`'${state.language}'`));
+    });
+  }
+  updateClearBtn();
 
   // ── Init — articles first, everything else in parallel ──────────────────────
   showSkeletons();

@@ -19,15 +19,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
   if (url.pathname.startsWith('/api/')) {
-    // Network-first for API — fresh data when online, cached fallback when offline
-    e.respondWith(
-      fetch(e.request)
-        .then(r => {
-          caches.open(CACHE).then(c => c.put(e.request, r.clone()));
-          return r;
-        })
-        .catch(() => caches.match(e.request))
-    );
+    // Stale-while-revalidate for API — respond immediately with cache, update in background
+    e.respondWith(staleWhileRevalidate(e.request));
   } else {
     // Cache-first for shell assets
     e.respondWith(
@@ -35,3 +28,13 @@ self.addEventListener('fetch', e => {
     );
   }
 });
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(request);
+  const fetchPromise = fetch(request).then(res => {
+    if (res.ok) cache.put(request, res.clone());
+    return res;
+  }).catch(() => null);
+  return cached || fetchPromise;
+}

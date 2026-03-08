@@ -1,4 +1,5 @@
 const express = require("express");
+const compression = require("compression");
 const cron = require("node-cron");
 const path = require("path");
 const { fetchAll, fetchStatus } = require("./fetcher");
@@ -8,8 +9,25 @@ const { getArticles, getCategories, getStats, getTrending, getRelated, getTopClu
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, "..", "public")));
+app.use(compression());
+app.use(express.static(path.join(__dirname, "..", "public"), {
+  maxAge: "1h",
+  setHeaders(res, filePath) {
+    // sw.js must always be fresh so the browser picks up cache version bumps
+    if (filePath.endsWith("sw.js")) res.setHeader("Cache-Control", "no-cache");
+  },
+}));
 app.use(express.json());
+
+// ── In-memory caches for stable/slow-changing endpoints ─────────────────────
+
+let _statsCache = null, _statsExpiry = 0;
+let _catsCache  = null, _catsExpiry  = 0;
+
+function invalidateCaches() {
+  _statsCache = null;
+  _catsCache  = null;
+}
 
 // ── API routes ──────────────────────────────────────────────────────────────
 
@@ -41,14 +59,24 @@ app.get("/api/clusters", (req, res) => {
   }
 });
 
-// GET /api/categories
+// GET /api/categories  – cached 1 hour (changes only when new feeds added)
 app.get("/api/categories", (req, res) => {
-  res.json(getCategories());
+  const now = Date.now();
+  if (!_catsCache || now > _catsExpiry) {
+    _catsCache  = getCategories();
+    _catsExpiry = now + 60 * 60 * 1000;
+  }
+  res.json(_catsCache);
 });
 
-// GET /api/stats
+// GET /api/stats  – cached 5 minutes
 app.get("/api/stats", (req, res) => {
-  res.json(getStats());
+  const now = Date.now();
+  if (!_statsCache || now > _statsExpiry) {
+    _statsCache  = getStats();
+    _statsExpiry = now + 5 * 60 * 1000;
+  }
+  res.json(_statsCache);
 });
 
 // GET /api/trending?hours=24
@@ -101,6 +129,7 @@ app.post("/api/fetch", async (req, res) => {
   res.json({ message: "Fetch started" });
   try {
     await fetchAll();
+    invalidateCaches(); // stats and categories may have changed
   } catch (err) {
     console.error("Manual fetch error:", err);
   }
@@ -110,7 +139,7 @@ app.post("/api/fetch", async (req, res) => {
 // Fetch RSS every 30 minutes
 cron.schedule("*/30 * * * *", () => {
   console.log("[cron] Scheduled fetch triggered");
-  fetchAll().catch(console.error);
+  fetchAll().then(invalidateCaches).catch(console.error);
 });
 
 // Fetch OSINT risk signals every hour

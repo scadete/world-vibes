@@ -124,6 +124,8 @@ try {
 
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_articles_cluster_id ON articles(cluster_id);
+  CREATE INDEX IF NOT EXISTS idx_articles_fetched_at   ON articles(fetched_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_articles_date_cat_lang ON articles(pub_date DESC, category, language);
 `);
 
 const insertArticle = db.prepare(`
@@ -399,16 +401,19 @@ function getArticles({ category, language, search, hours, limit = 50, offset = 0
 
 function getTopClusters(limit = 20) {
   return db.prepare(`
+    WITH latest AS (
+      SELECT cluster_id, title, link,
+             ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY pub_date DESC) AS rn
+      FROM articles WHERE cluster_id IS NOT NULL
+    )
     SELECT
-      c.id,
-      c.source_count,
-      c.article_count,
-      c.updated_at,
+      c.id, c.source_count, c.article_count, c.updated_at,
       GROUP_CONCAT(DISTINCT a.feed_name) AS sources,
-      (SELECT title FROM articles WHERE cluster_id = c.id ORDER BY pub_date DESC LIMIT 1) AS sample_title,
-      (SELECT link  FROM articles WHERE cluster_id = c.id ORDER BY pub_date DESC LIMIT 1) AS sample_link
+      l.title AS sample_title,
+      l.link  AS sample_link
     FROM clusters c
     JOIN articles a ON a.cluster_id = c.id
+    JOIN latest l ON l.cluster_id = c.id AND l.rn = 1
     WHERE c.source_count >= 2
     GROUP BY c.id
     ORDER BY c.source_count DESC, c.updated_at DESC
