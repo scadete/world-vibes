@@ -241,6 +241,25 @@ function getStats() {
 
 // ── Trending keywords ─────────────────────────────────────────────────────────
 
+const STOPWORDS = new Set([
+  // English
+  'the','and','for','that','this','with','from','have','been','were','will','would',
+  'could','should','their','there','what','when','where','which','while','about',
+  'also','into','than','then','them','they','some','more','other','over','after',
+  'before','between','both','such','your','our','its','not','but','are','was',
+  'had','has','his','her','him','who','how','all','any','can','may','one','two',
+  'new','use','just','time','year','years','says','said','told',
+  // Português
+  'que','não','uma','com','por','para','mais','como','mas','foi','ele','ela',
+  'dos','das','nos','nas','esse','esta','isso','pelo','pela','num','numa',
+  'seu','sua','seus','suas','também','quando','onde','porque','ainda','sobre',
+  'entre','após','contra','durante','até','desde','sem','sob','cada','todo',
+  'toda','todos','todas','muito','mesmo','depois','antes','outro','outra',
+  // Español
+  'los','las','del','con','por','para','más','como','pero','fue','ser',
+  'está','son','han','les','sus','ese','eso','año','años','vez','hay','muy',
+]);
+
 function getTrending(hours = 24, topN = 20) {
   const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
   const rows = db.prepare(

@@ -722,62 +722,31 @@
   }
 
   // ── Related articles ────────────────────────────────────────────────────────
-  async function toggleRelated(article, btn, panel) {
+  function toggleRelated(article, btn, panel) {
     if (panel.children.length > 0) {
       panel.innerHTML = '';
       btn.textContent = '[+] Ver relacionados';
       return;
     }
-
-    // Use cluster data from worker if available (cross-language, instant)
-    const fromCluster = _relatedMap.get(article.guid);
-    if (fromCluster !== undefined) {
-      const inner = document.createElement('div');
-      inner.className = 'related-panel-inner';
-      if (!fromCluster.length) {
-        inner.innerHTML = '<div class="related-panel-title">// nenhum artigo relacionado</div>';
-      } else {
-        inner.innerHTML = '<div class="related-panel-title">// artigos relacionados</div>';
-        fromCluster.forEach(a => {
-          const item = document.createElement('div');
-          item.className = 'related-item';
-          item.innerHTML = `
-            <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
-            <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
-          `;
-          inner.appendChild(item);
-        });
-      }
-      panel.appendChild(inner);
-      btn.textContent = '[-] Fechar';
-      return;
+    const related = _relatedMap.get(article.guid) || [];
+    const inner = document.createElement('div');
+    inner.className = 'related-panel-inner';
+    if (!related.length) {
+      inner.innerHTML = '<div class="related-panel-title">// nenhum artigo relacionado</div>';
+    } else {
+      inner.innerHTML = '<div class="related-panel-title">// artigos relacionados</div>';
+      related.forEach(a => {
+        const item = document.createElement('div');
+        item.className = 'related-item';
+        item.innerHTML = `
+          <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
+          <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
+        `;
+        inner.appendChild(item);
+      });
     }
-
-    // Fallback: server-side FTS
-    btn.textContent = '[ carregando... ]';
-    try {
-      const related = await (await fetch(`/api/articles/${article.id}/related`)).json();
-      const inner = document.createElement('div');
-      inner.className = 'related-panel-inner';
-      if (!related.length) {
-        inner.innerHTML = '<div class="related-panel-title">// nenhum artigo relacionado</div>';
-      } else {
-        inner.innerHTML = '<div class="related-panel-title">// artigos relacionados</div>';
-        related.forEach(a => {
-          const item = document.createElement('div');
-          item.className = 'related-item';
-          item.innerHTML = `
-            <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
-            <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
-          `;
-          inner.appendChild(item);
-        });
-      }
-      panel.appendChild(inner);
-      btn.textContent = '[-] Fechar';
-    } catch {
-      btn.textContent = '[+] Ver relacionados';
-    }
+    panel.appendChild(inner);
+    btn.textContent = '[-] Fechar';
   }
 
   function loadMore() { loadArticles(true); }
@@ -1065,14 +1034,9 @@
           list.innerHTML = `<div class="no-highlights">[ a descarregar modelo: ${msg.progress}% ]</div>`;
         } else if (msg.type === 'progress') {
           list.innerHTML = `<div class="no-highlights">[ a analisar artigos: ${msg.done}/${msg.total} ]</div>`;
+        } else if (msg.type === 'related') {
+          _relatedMap = new Map(Object.entries(msg.data));
         } else if (msg.type === 'clusters') {
-          // Build related-articles map from cluster data (cross-language, instant)
-          _relatedMap = new Map();
-          for (const cl of msg.data) {
-            for (const art of cl.articles) {
-              _relatedMap.set(art.guid, cl.articles.filter(a => a.guid !== art.guid));
-            }
-          }
           renderClusters(msg.data);
         } else if (msg.type === 'error') {
           list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ]</div>`;

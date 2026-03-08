@@ -93,6 +93,22 @@ self.onmessage = async ({ data: { articles } }) => {
       self.postMessage({ type: 'progress', done: i + 1, total: articles.length });
     }
 
+    // Related articles map (lower threshold than clustering — topically related)
+    const RELATED_THRESHOLD = 0.45;
+    const relatedData = {};
+    for (let i = 0; i < articles.length; i++) {
+      for (let j = i + 1; j < articles.length; j++) {
+        if (articles[i].feed_name === articles[j].feed_name) continue;
+        const sim = cosineSim(embeddings[i], embeddings[j]);
+        if (sim > RELATED_THRESHOLD) {
+          const gi = articles[i].guid, gj = articles[j].guid;
+          (relatedData[gi] = relatedData[gi] || []).push(articles[j]);
+          (relatedData[gj] = relatedData[gj] || []).push(articles[i]);
+        }
+      }
+    }
+    self.postMessage({ type: 'related', data: relatedData });
+
     // Greedy cosine similarity clustering
     const assigned = new Map(); // article index → cluster id
     let nextCid = 0;
