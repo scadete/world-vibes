@@ -4,8 +4,8 @@ let _pipe = null;
 
 async function getEmbedder() {
   if (!_pipe) {
-    console.log("[embeddings] Loading all-MiniLM-L6-v2 (first run downloads ~23MB)…");
-    _pipe = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    console.log("[embeddings] Loading paraphrase-multilingual-MiniLM-L12-v2 (first run downloads ~430MB)…");
+    _pipe = await pipeline("feature-extraction", "Xenova/paraphrase-multilingual-MiniLM-L12-v2");
   }
   return _pipe;
 }
