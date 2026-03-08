@@ -300,6 +300,13 @@
     .rm-desc   { flex: 1; color: var(--text-muted); }
     .rm-count  { color: var(--text); text-align: right; white-space: nowrap; }
     .rm-meta   { color: var(--text-muted); font-style: italic; }
+    .rm-has-error .rm-source { color: #ff5555; }
+    .rm-error  { font-size: 0.65rem; color: #ff5555; margin-top: 0.1rem; opacity: 0.85; }
+    button.risk-modal-footer {
+      display: block; width: 100%; text-align: left;
+      background: none; border: none; padding: 0; cursor: pointer;
+    }
+    button.risk-modal-footer:hover { color: var(--accent); }
 
     .highlights-section { margin-bottom: 1.25rem; }
     .no-highlights {
@@ -840,9 +847,12 @@
       const n = s.signal_count || 0;
       const label = n === 1 ? '1 sinal' : `${n} sinais`;
       const when = s.last_fetched_at ? relativeTime(s.last_fetched_at) : 'nunca';
-      return `<div class="risk-modal-row">
+      const errHtml = s.last_error
+        ? `<div class="rm-error">⚠ ${escHtml(s.last_error.slice(0, 80))}</div>`
+        : '';
+      return `<div class="risk-modal-row${s.last_error ? ' rm-has-error' : ''}">
         <span class="rm-source">${escHtml(s.source)}</span>
-        <span class="rm-desc">${escHtml(s.description)}</span>
+        <span class="rm-desc">${escHtml(s.description)}${errHtml}</span>
         <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
       </div>`;
     }).join('');
@@ -1065,7 +1075,7 @@
   <div class="risk-modal" onclick="event.stopPropagation()">
     <div class="risk-modal-header">╔══ FONTES OSINT CONSULTADAS ══════════════════════════════╗</div>
     <div class="risk-modal-body" id="riskModalBody">[ a carregar... ]</div>
-    <div class="risk-modal-footer">╚══ [Esc] para fechar ══════════════════════════════════════╝</div>
+    <button class="risk-modal-footer" onclick="closeRiskModal()" title="Fechar modal">╚══ [×] fechar ══════════════════════════════════════════╝</button>
   </div>
 </div>
 </body>

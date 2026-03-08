@@ -412,7 +412,13 @@ async function fetchRiskSignals() {
     const meta = SOURCE_META[i];
     const items = r.status === "fulfilled" ? r.value : [];
     signals.push(...items);
-    logEntries.push({ ...meta, signal_count: items.length });
+    logEntries.push({
+      ...meta,
+      signal_count: items.length,
+      last_error: r.status === "rejected"
+        ? (r.reason?.message || String(r.reason)).slice(0, 200)
+        : null,
+    });
     if (r.status === "rejected") {
       console.error(`[risk] ${meta.source} failed: ${r.reason?.message || r.reason}`);
     }
@@ -426,6 +432,7 @@ async function fetchRiskSignals() {
     category:     "geopolitical",
     description:  "Pentagon Pizza Index — stress geopolítico composto",
     signal_count: 1,
+    last_error:   null,
   });
 
   saveRiskSignals(signals, logEntries);

@@ -107,6 +107,11 @@ try {
   db.exec("ALTER TABLE articles ADD COLUMN embedding BLOB");
 } catch { /* column already exists */ }
 
+// Add last_error column to risk_fetch_log (idempotent migration)
+try {
+  db.exec("ALTER TABLE risk_fetch_log ADD COLUMN last_error TEXT");
+} catch { /* column already exists */ }
+
 db.exec(`
   CREATE INDEX IF NOT EXISTS idx_articles_cluster_id ON articles(cluster_id);
 `);
@@ -518,19 +523,29 @@ const insertRiskSignal = db.prepare(`
 `);
 
 const upsertFetchLog = db.prepare(`
-  INSERT OR REPLACE INTO risk_fetch_log (source, category, description, last_fetched_at, signal_count)
-  VALUES (@source, @category, @description, @last_fetched_at, @signal_count)
+  INSERT OR REPLACE INTO risk_fetch_log (source, category, description, last_fetched_at, signal_count, last_error)
+  VALUES (@source, @category, @description, @last_fetched_at, @signal_count, @last_error)
 `);
 
 function saveRiskSignals(signals, logEntries = []) {
-  const run = db.transaction(() => {
-    for (const s of signals) insertRiskSignal(s);
-    const now = new Date().toISOString();
-    for (const e of logEntries) {
-      upsertFetchLog({ ...e, last_fetched_at: now });
-    }
-  });
-  run();
+  // Transaction 1: insert signals — individual failures are skipped, not fatal
+  try {
+    db.transaction(() => {
+      for (const s of signals) {
+        try { insertRiskSignal.run(s); } catch { /* skip invalid/duplicate signal */ }
+      }
+    })();
+  } catch { /* ignore */ }
+
+  // Transaction 2: update fetch log — ALWAYS runs, even if signal inserts failed
+  const now = new Date().toISOString();
+  try {
+    db.transaction(() => {
+      for (const e of logEntries) {
+        upsertFetchLog.run({ last_error: null, ...e, last_fetched_at: now });
+      }
+    })();
+  } catch { /* ignore */ }
 }
 
 function getRiskSignals(limit = 30) {
