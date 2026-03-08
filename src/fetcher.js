@@ -3,11 +3,6 @@ const { saveArticles } = require("./db");
 const FEEDS = require("./feeds");
 
 const parser = new Parser({
-  timeout: 15000,
-  headers: {
-    "User-Agent": "WorldVibes-RSS-Aggregator/1.0 (+https://github.com/world-vibes)",
-    "Accept": "application/rss+xml, application/xml, text/xml, */*",
-  },
   customFields: {
     item: [
       ["content:encoded", "contentEncoded"],
@@ -33,9 +28,35 @@ function sanitize(str) {
   return str.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 1000);
 }
 
+async function fetchWithEncoding(url) {
+  const res = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent': 'WorldVibes-RSS-Aggregator/1.0',
+      'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const buf = Buffer.from(await res.arrayBuffer());
+
+  // XML declaration has highest priority, then Content-Type header
+  const peek = buf.slice(0, 300).toString('ascii');
+  const xmlEnc = (peek.match(/encoding=["']([^"']+)/i) || [])[1] || '';
+  const ct = res.headers.get('content-type') || '';
+  const ctEnc = (ct.match(/charset=([^\s;]+)/i) || [])[1] || '';
+
+  const charset = (xmlEnc || ctEnc || 'utf-8').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // latin1 = ISO-8859-1 bijection: maps bytes 0x00–0xFF → U+0000–U+00FF
+  // correctly preserves é ã ç ó ú for ISO-8859-* and Windows-125* feeds
+  return charset.startsWith('utf') ? buf.toString('utf8') : buf.toString('latin1');
+}
+
 async function fetchFeed(feed) {
   try {
-    const parsed = await parser.parseURL(feed.url);
+    const xml = await fetchWithEncoding(feed.url);
+    const parsed = await parser.parseString(xml);
     const articles = parsed.items.map((item) => ({
       guid: item.guid || item.link || `${feed.name}::${item.title}`,
       title: item.title || "Untitled",
