@@ -1,8 +1,6 @@
 // Web Worker (module) — semantic clustering via Transformers.js in browser
 // Model is downloaded once and cached by the browser automatically.
 
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.esm.min.js';
-
 const SIMILARITY_THRESHOLD = 0.76;
 const IDB_NAME  = 'wv-embeddings';
 const IDB_STORE = 'emb';
@@ -52,6 +50,8 @@ function cosineSim(a, b) {
 
 self.onmessage = async ({ data: { articles } }) => {
   try {
+    const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.esm.min.js');
+
     const db = await openDB();
 
     self.postMessage({ type: 'status', msg: 'A carregar modelo semântico…' });
