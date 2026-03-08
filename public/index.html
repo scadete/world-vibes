@@ -601,8 +601,9 @@
   let state = {
     category: _savedState.category || 'all',
     language: _savedState.language || 'all',
-    search: '', offset: 0, loading: false
+    search: '', cluster: null, offset: 0, loading: false
   };
+  let _relatedMap = new Map();
 
   function persistState() {
     localStorage.setItem('wv-state', JSON.stringify({ category: state.category, language: state.language }));
@@ -650,6 +651,16 @@
   // ── Fetch articles ──────────────────────────────────────────────────────────
   async function loadArticles(append = false) {
     if (state.loading) return;
+
+    // Cluster view: render articles directly from worker data, no API call
+    if (state.cluster) {
+      const el = document.getElementById('articles');
+      el.innerHTML = '';
+      state.cluster.forEach(a => el.appendChild(makeCard(a)));
+      document.getElementById('loadMoreWrap').style.display = 'none';
+      return;
+    }
+
     state.loading = true;
 
     const el = document.getElementById('articles');
@@ -706,20 +717,46 @@
     `;
     const btn = div.querySelector('.card-related-btn');
     const panel = div.querySelector('.related-panel');
-    btn.addEventListener('click', () => toggleRelated(a.id, btn, panel));
+    btn.addEventListener('click', () => toggleRelated(a, btn, panel));
     return div;
   }
 
   // ── Related articles ────────────────────────────────────────────────────────
-  async function toggleRelated(articleId, btn, panel) {
+  async function toggleRelated(article, btn, panel) {
     if (panel.children.length > 0) {
       panel.innerHTML = '';
       btn.textContent = '[+] Ver relacionados';
       return;
     }
+
+    // Use cluster data from worker if available (cross-language, instant)
+    const fromCluster = _relatedMap.get(article.guid);
+    if (fromCluster !== undefined) {
+      const inner = document.createElement('div');
+      inner.className = 'related-panel-inner';
+      if (!fromCluster.length) {
+        inner.innerHTML = '<div class="related-panel-title">// nenhum artigo relacionado</div>';
+      } else {
+        inner.innerHTML = '<div class="related-panel-title">// artigos relacionados</div>';
+        fromCluster.forEach(a => {
+          const item = document.createElement('div');
+          item.className = 'related-item';
+          item.innerHTML = `
+            <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
+            <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
+          `;
+          inner.appendChild(item);
+        });
+      }
+      panel.appendChild(inner);
+      btn.textContent = '[-] Fechar';
+      return;
+    }
+
+    // Fallback: server-side FTS
     btn.textContent = '[ carregando... ]';
     try {
-      const related = await (await fetch(`/api/articles/${articleId}/related`)).json();
+      const related = await (await fetch(`/api/articles/${article.id}/related`)).json();
       const inner = document.createElement('div');
       inner.className = 'related-panel-inner';
       if (!related.length) {
@@ -747,12 +784,12 @@
 
   // ── Filters ─────────────────────────────────────────────────────────────────
   function updateClearBtn() {
-    const active = state.search !== '' || state.category !== 'all' || state.language !== 'all';
+    const active = state.search !== '' || state.category !== 'all' || state.language !== 'all' || state.cluster !== null;
     document.getElementById('clearFiltersBtn').classList.toggle('visible', active);
   }
 
   function clearFilters() {
-    state.search = ''; state.category = 'all'; state.language = 'all';
+    state.search = ''; state.category = 'all'; state.language = 'all'; state.cluster = null;
     document.getElementById('searchInput').value = '';
     document.querySelectorAll('#langToolbar .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
     document.querySelectorAll('#catToolbar  .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
@@ -762,7 +799,7 @@
   }
 
   function setFilter(key, val, btn) {
-    state[key] = val;
+    state[key] = val; state.cluster = null;
     btn.parentElement.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     updateClearBtn();
@@ -771,6 +808,7 @@
   }
 
   function applySearch() {
+    state.cluster = null;
     state.search = document.getElementById('searchInput').value.trim();
     updateClearBtn();
     loadArticles();
@@ -988,13 +1026,12 @@
           ${sources ? `<div class="highlight-item-sources">${escHtml(sources)}</div>` : ''}
         </div>
       `;
-      if (cluster.sample_title) {
+      if (cluster.articles && cluster.articles.length) {
         item.addEventListener('click', () => {
-          const q = (cluster.sample_title || '').split(/\s+/).slice(0, 4).join(' ');
-          document.getElementById('searchInput').value = q;
-          state.search = q;
+          state.cluster = cluster.articles;
+          state.search = '';
+          document.getElementById('searchInput').value = '';
           updateClearBtn();
-          persistState();
           loadArticles();
         });
       }
@@ -1029,6 +1066,13 @@
         } else if (msg.type === 'progress') {
           list.innerHTML = `<div class="no-highlights">[ a analisar artigos: ${msg.done}/${msg.total} ]</div>`;
         } else if (msg.type === 'clusters') {
+          // Build related-articles map from cluster data (cross-language, instant)
+          _relatedMap = new Map();
+          for (const cl of msg.data) {
+            for (const art of cl.articles) {
+              _relatedMap.set(art.guid, cl.articles.filter(a => a.guid !== art.guid));
+            }
+          }
           renderClusters(msg.data);
         } else if (msg.type === 'error') {
           list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ]</div>`;

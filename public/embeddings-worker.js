@@ -130,6 +130,7 @@ self.onmessage = async ({ data: { articles } }) => {
           sources: feeds.join(','),
           sample_title: arts[0].title,
           sample_link:  arts[0].link,
+          articles: arts,
         };
       })
       .filter(Boolean)
