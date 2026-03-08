@@ -51,6 +51,7 @@ db.exec(`
   );
 `);
 
+
 // ── Risk signals table ────────────────────────────────────────────────────────
 db.exec(`
   CREATE TABLE IF NOT EXISTS risk_signals (
@@ -135,148 +136,6 @@ const insertArticle = db.prepare(`
     (@guid, @title, @link, @description, @content, @pub_date, @author, @feed_name, @category, @language)
 `);
 
-// ── Stopwords ─────────────────────────────────────────────────────────────────
-
-const STOPWORDS = new Set([
-  // English — function words
-  "the","and","for","are","was","with","this","that","have","from","they",
-  "will","been","their","said","what","which","when","were","also","into",
-  "more","than","then","your","about","after","over","other","only","some",
-  "just","most","like","time","would","could","should","there","these",
-  "those","each","very","much","well","such","know","even","both","come",
-  "here","its","has","his","her","our","any","all","now","new","can",
-  "may","one","two","three","how","who","but","not","yet","still",
-  // English — days & months
-  "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
-  "january","february","march","april","june","july","august",
-  "september","october","november","december",
-  // English — common news verbs (low signal)
-  "says","say","said","told","tell","tells","report","reports","reported",
-  "calls","called","asks","asked","makes","made","take","took","give","gave",
-  "held","left","gets","sets","hits","puts","runs","goes","went","come",
-  "came","seen","sees","keep","kept","used","uses","want","wants","need",
-  "needs","show","shows","find","found","help","helps","plan","plans",
-  "move","moves","turn","turns","face","faces","lead","leads","meet","meets",
-  "hold","holds","open","opens","push","claim","claims","warn","warns",
-  "urge","urges","seek","seeks","back","draw","drawn","sign","vote","votes",
-  "raise","raised","lower","lowered","named","amid","despite","according",
-  // English — generic news nouns (low signal)
-  "news","year","years","week","weeks","days","today","month","months",
-  "time","times","people","world","country","countries","state","states",
-  "government","president","minister","official","officials","statement",
-  "first","last","next","high","away","live","deal","talk","talks",
-  "says","call","calls","case","cases","part","parts","group","groups",
-  "area","areas","home","city","cities","place","places","point","points",
-  "right","rights","side","sides","life","lives","line","lines","long",
-  "number","numbers","major","major","latest","former","senior","amid",
-  // English — RSS/blog boilerplate
-  "reading","read","continue","continued","click","subscribe","follow",
-  "comment","comments","leave","share","tweet","posted","post","appeared",
-  "https","http","www","via","full","story","article","source","author",
-  "million","billion","trillion","thousand","percent",
-  // Portuguese — function words
-  "para","como","uma","dos","das","mais","por","isso","este","esta","pelo",
-  "pela","seus","suas","sobre","entre","antes","depois","ainda","pode",
-  "pois","quando","onde","numa","quem","qual","tudo","toda","todos","todas",
-  "novo","nova","novos","novas","anos","sendo","foram","têm","após","caso",
-  // Portuguese — days & months
-  "segunda","terça","quarta","quinta","sexta","sábado","domingo",
-  "janeiro","fevereiro","março","abril","maio","junho","julho","agosto",
-  "setembro","outubro","novembro","dezembro",
-  // Portuguese — common news verbs & nouns
-  "disse","afirmou","segundo","conforme","durante","enquanto","através",
-  "governo","presidente","ministro","primeiro","última","último",
-  "declarou","anunciou","informou","pessoas","mundo","país","países",
-  "estado","estados","cidade","cidades","semana","meses","hoje","ontem",
-  "desta","deste","nesta","neste","pelo","pela","pelos","pelas",
-  // Portuguese — RSS/blog boilerplate
-  "leia","clique","acesse","saiba","veja","confira","matéria","notícia",
-  "feira","leia","conteúdo","texto","artigo","postagem","publicado",
-  "continua","continue","clique","aqui","mais","fonte","autor",
-  // Spanish — function words
-  "para","como","los","las","sus","del","pero","sido","estos","estas",
-  "todo","toda","ellos","ellas","después","antes","sobre","también","puede",
-  "están","tiene","tienen","según","través","contra","durante","mismo","hace",
-  // Spanish — days & months
-  "lunes","martes","miércoles","jueves","viernes","sábado","domingo",
-  "enero","febrero","marzo","abril","mayo","junio","julio","agosto",
-  "septiembre","octubre","noviembre","diciembre",
-  // Spanish — common news verbs & nouns
-  "dice","dijo","afirmó","señaló","aseguró","informó","anunció",
-  "gobierno","presidente","ministro","primero","nueva","nuevo",
-  "personas","mundo","país","países","estado","estados","ciudad",
-  "ciudades","semana","meses","hoy","ayer","esta","este","estos",
-]);
-
-// ── Story clustering (embedding-based) ────────────────────────────────────────
-
-const SIMILARITY_THRESHOLD = 0.76;
-
-const stmtSetCluster    = db.prepare("UPDATE articles SET cluster_id = ? WHERE id = ?");
-const stmtInsertCluster = db.prepare(
-  "INSERT INTO clusters (article_count, source_count) VALUES (?, ?)"
-);
-const stmtRecalcCluster = db.prepare(`
-  UPDATE clusters SET
-    article_count = (SELECT COUNT(*)                  FROM articles WHERE cluster_id = ?),
-    source_count  = (SELECT COUNT(DISTINCT feed_name) FROM articles WHERE cluster_id = ?),
-    updated_at    = datetime('now')
-  WHERE id = ?
-`);
-const stmtGetCandidates = db.prepare(`
-  SELECT id, cluster_id, embedding FROM articles
-  WHERE pub_date >= datetime('now', '-48 hours')
-    AND id != ?
-    AND feed_name != ?
-    AND embedding IS NOT NULL
-`);
-
-function cosineSim(bufA, bufB) {
-  const a = new Float32Array(bufA.buffer, bufA.byteOffset, bufA.byteLength / 4);
-  const b = new Float32Array(bufB.buffer, bufB.byteOffset, bufB.byteLength / 4);
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na  += a[i] * a[i];
-    nb  += b[i] * b[i];
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom > 0 ? dot / denom : 0;
-}
-
-function clusterArticle(articleId) {
-  const article = db.prepare(
-    "SELECT id, language, feed_name, cluster_id, embedding FROM articles WHERE id = ?"
-  ).get(articleId);
-  if (!article || !article.embedding) return;
-
-  const candidates = stmtGetCandidates.all(articleId, article.feed_name);
-
-  let bestMatch = null;
-  let bestSim   = SIMILARITY_THRESHOLD;
-
-  for (const cand of candidates) {
-    if (!cand.embedding) continue;
-    const sim = cosineSim(article.embedding, cand.embedding);
-    if (sim > bestSim) {
-      bestSim   = sim;
-      bestMatch = cand;
-    }
-  }
-
-  if (!bestMatch) return;
-
-  if (bestMatch.cluster_id) {
-    stmtSetCluster.run(bestMatch.cluster_id, articleId);
-    stmtRecalcCluster.run(bestMatch.cluster_id, bestMatch.cluster_id, bestMatch.cluster_id);
-  } else {
-    const cid = stmtInsertCluster.run(2, 2).lastInsertRowid;
-    stmtSetCluster.run(cid, articleId);
-    stmtSetCluster.run(cid, bestMatch.id);
-    stmtRecalcCluster.run(cid, cid, cid);
-  }
-}
-
 // ── Save articles ─────────────────────────────────────────────────────────────
 
 function saveArticles(articles) {
@@ -287,32 +146,6 @@ function saveArticles(articles) {
     }
     return count;
   })(articles);
-}
-
-// ── Embed new articles and cluster them (called after each fetchAll) ───────────
-
-async function embedAndCluster() {
-  const { embed } = require("./embeddings");
-  const unembedded = db.prepare(
-    "SELECT id, title, description FROM articles WHERE embedding IS NULL ORDER BY fetched_at DESC"
-  ).all();
-
-  if (unembedded.length === 0) return;
-  console.log(`[embeddings] Processing ${unembedded.length} articles…`);
-
-  const stmtSaveEmb = db.prepare("UPDATE articles SET embedding = ? WHERE id = ?");
-
-  for (const article of unembedded) {
-    const text = `${article.title}. ${article.description || ""}`.slice(0, 512);
-    try {
-      const buf = await embed(text);
-      stmtSaveEmb.run(buf, article.id);
-      clusterArticle(article.id);
-    } catch (err) {
-      console.error(`[embeddings] article ${article.id}: ${err.message}`);
-    }
-  }
-  console.log("[embeddings] Done.");
 }
 
 // ── FTS query sanitizer ───────────────────────────────────────────────────────
@@ -337,10 +170,9 @@ function getArticles({ category, language, search, hours, limit = 50, offset = 0
     if (!ftsQuery) return [];
 
     let query = `
-      SELECT a.*, COALESCE(c.source_count, 1) AS source_count
+      SELECT a.*
       FROM articles a
       JOIN articles_fts ON a.id = articles_fts.rowid
-      LEFT JOIN clusters c ON a.cluster_id = c.id
       WHERE articles_fts MATCH ?
     `;
     params.push(ftsQuery);
@@ -358,7 +190,7 @@ function getArticles({ category, language, search, hours, limit = 50, offset = 0
       params.push(language);
     }
 
-    query += " ORDER BY bm25(articles_fts), a.pub_date DESC, COALESCE(c.source_count, 1) DESC";
+    query += " ORDER BY bm25(articles_fts), a.pub_date DESC";
     query += " LIMIT ? OFFSET ?";
     params.push(limit, offset);
 
@@ -370,12 +202,7 @@ function getArticles({ category, language, search, hours, limit = 50, offset = 0
   }
 
   // No search — use regular indexed query
-  let query = `
-    SELECT a.*, COALESCE(c.source_count, 1) AS source_count
-    FROM articles a
-    LEFT JOIN clusters c ON a.cluster_id = c.id
-    WHERE 1=1
-  `;
+  let query = `SELECT a.* FROM articles a WHERE 1=1`;
 
   if (since) {
     query += " AND a.pub_date >= ?";
@@ -390,35 +217,11 @@ function getArticles({ category, language, search, hours, limit = 50, offset = 0
     params.push(language);
   }
 
-  query += " ORDER BY a.pub_date DESC, COALESCE(c.source_count, 1) DESC, a.fetched_at DESC";
+  query += " ORDER BY a.pub_date DESC, a.fetched_at DESC";
   query += " LIMIT ? OFFSET ?";
   params.push(limit, offset);
 
   return db.prepare(query).all(...params);
-}
-
-// ── Top story clusters ────────────────────────────────────────────────────────
-
-function getTopClusters(limit = 20) {
-  return db.prepare(`
-    WITH latest AS (
-      SELECT cluster_id, title, link,
-             ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY pub_date DESC) AS rn
-      FROM articles WHERE cluster_id IS NOT NULL
-    )
-    SELECT
-      c.id, c.source_count, c.article_count, c.updated_at,
-      GROUP_CONCAT(DISTINCT a.feed_name) AS sources,
-      l.title AS sample_title,
-      l.link  AS sample_link
-    FROM clusters c
-    JOIN articles a ON a.cluster_id = c.id
-    JOIN latest l ON l.cluster_id = c.id AND l.rn = 1
-    WHERE c.source_count >= 2
-    GROUP BY c.id
-    ORDER BY c.source_count DESC, c.updated_at DESC
-    LIMIT ?
-  `).all(limit);
 }
 
 // ── Categories / Stats ────────────────────────────────────────────────────────
@@ -428,18 +231,11 @@ function getCategories() {
 }
 
 function getStats() {
-  const clusterStats = db.prepare(
-    "SELECT COUNT(*) as total, SUM(CASE WHEN source_count >= 2 THEN 1 ELSE 0 END) as multi FROM clusters"
-  ).get();
   return {
     total: db.prepare("SELECT COUNT(*) as c FROM articles").get().c,
     byCategory: db.prepare("SELECT category, COUNT(*) as count FROM articles GROUP BY category ORDER BY count DESC").all(),
     byLanguage: db.prepare("SELECT language, COUNT(*) as count FROM articles GROUP BY language ORDER BY count DESC").all(),
     lastFetch: db.prepare("SELECT MAX(fetched_at) as last FROM articles").get().last,
-    clusters: {
-      total: clusterStats.total || 0,
-      multiSource: clusterStats.multi || 0,
-    },
   };
 }
 
@@ -595,13 +391,11 @@ function getRiskSignals(limit = 30) {
 
 module.exports = {
   saveArticles,
-  embedAndCluster,
   getArticles,
   getCategories,
   getStats,
   getTrending,
   getRelated,
-  getTopClusters,
   saveRiskSignals,
   getRiskSignals,
 };

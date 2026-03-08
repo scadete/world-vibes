@@ -966,42 +966,82 @@
     }
   }
 
-  // ── Clusters ────────────────────────────────────────────────────────────────
+  // ── Clusters — client-side via Web Worker + Transformers.js ─────────────────
+
+  let _clusterWorker = null;
+
+  function renderClusters(data) {
+    const list = document.getElementById('highlightsList');
+    if (!data.length) {
+      list.innerHTML = '<div class="no-highlights">[ nenhum destaque identificado — aguardando múltiplos veículos sobre o mesmo tema ]</div>';
+      return;
+    }
+    list.innerHTML = '';
+    data.slice(0, 6).forEach(cluster => {
+      const item = document.createElement('div');
+      item.className = 'highlight-item';
+      const sources = cluster.sources ? cluster.sources.split(',').join(' · ') : '';
+      item.innerHTML = `
+        <span class="cluster-badge" title="${cluster.source_count} fontes">[${cluster.source_count}x]</span>
+        <div>
+          <div class="highlight-item-title">${escHtml(cluster.sample_title || '')}</div>
+          ${sources ? `<div class="highlight-item-sources">${escHtml(sources)}</div>` : ''}
+        </div>
+      `;
+      if (cluster.sample_title) {
+        item.addEventListener('click', () => {
+          const q = (cluster.sample_title || '').split(/\s+/).slice(0, 4).join(' ');
+          document.getElementById('searchInput').value = q;
+          state.search = q;
+          updateClearBtn();
+          persistState();
+          loadArticles();
+        });
+      }
+      list.appendChild(item);
+    });
+  }
+
   async function loadClusters() {
     const section = document.getElementById('highlightsSection');
     const list = document.getElementById('highlightsList');
     section.style.display = 'block';
+    list.innerHTML = '<div class="no-highlights">[ a inicializar análise semântica… ]</div>';
+
     try {
-      const data = await (await fetch('/api/clusters?limit=6')).json();
-      if (!data.length) {
-        list.innerHTML = '<div class="no-highlights">[ nenhum destaque identificado — aguardando múltiplos veículos sobre o mesmo tema ]</div>';
+      // Fetch a broader article set for cross-source clustering
+      const data = await (await fetch('/api/articles?hours=48&limit=150')).json();
+      const articles = data.articles || [];
+      if (!articles.length) {
+        list.innerHTML = '<div class="no-highlights">[ sem artigos recentes para análise ]</div>';
         return;
       }
-      list.innerHTML = '';
-      data.forEach(cluster => {
-        const item = document.createElement('div');
-        item.className = 'highlight-item';
-        const sources = cluster.sources ? cluster.sources.split(',').join(' · ') : '';
-        item.innerHTML = `
-          <span class="cluster-badge" title="${cluster.source_count} fontes">[${cluster.source_count}x]</span>
-          <div>
-            <div class="highlight-item-title">${escHtml(cluster.sample_title || '')}</div>
-            ${sources ? `<div class="highlight-item-sources">${escHtml(sources)}</div>` : ''}
-          </div>
-        `;
-        if (cluster.sample_title) {
-          item.addEventListener('click', () => {
-            const q = (cluster.sample_title || '').split(/\s+/).slice(0, 4).join(' ');
-            document.getElementById('searchInput').value = q;
-            state.search = q;
-            updateClearBtn();
-            loadArticles();
-          });
+
+      if (_clusterWorker) _clusterWorker.terminate();
+      _clusterWorker = new Worker('/embeddings-worker.js', { type: 'module' });
+      _clusterWorker.postMessage({ articles });
+
+      _clusterWorker.onmessage = ({ data: msg }) => {
+        if (msg.type === 'status') {
+          list.innerHTML = `<div class="no-highlights">[ ${escHtml(msg.msg)} ]</div>`;
+        } else if (msg.type === 'download') {
+          list.innerHTML = `<div class="no-highlights">[ a descarregar modelo: ${msg.progress}% ]</div>`;
+        } else if (msg.type === 'progress') {
+          list.innerHTML = `<div class="no-highlights">[ a analisar artigos: ${msg.done}/${msg.total} ]</div>`;
+        } else if (msg.type === 'clusters') {
+          renderClusters(msg.data);
+        } else if (msg.type === 'error') {
+          list.innerHTML = '<div class="no-highlights">[ erro ao calcular destaques ]</div>';
+          console.warn('[clusters] worker error:', msg.msg);
         }
-        list.appendChild(item);
-      });
+      };
+
+      _clusterWorker.onerror = (e) => {
+        list.innerHTML = '<div class="no-highlights">[ erro ao iniciar análise semântica ]</div>';
+        console.warn('[clusters] worker onerror:', e);
+      };
     } catch {
-      list.innerHTML = '<div class="no-highlights">[ erro ao carregar destaques ]</div>';
+      list.innerHTML = '<div class="no-highlights">[ erro ao carregar artigos para análise ]</div>';
     }
   }
 

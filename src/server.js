@@ -4,7 +4,7 @@ const cron = require("node-cron");
 const path = require("path");
 const { fetchAll, fetchStatus } = require("./fetcher");
 const { fetchRiskSignals } = require("./risk");
-const { getArticles, getCategories, getStats, getTrending, getRelated, getTopClusters, getRiskSignals } = require("./db");
+const { getArticles, getCategories, getStats, getTrending, getRelated, getRiskSignals } = require("./db");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,16 +44,6 @@ app.get("/api/articles", (req, res) => {
       offset: parseInt(offset) || 0,
     });
     res.json({ articles, count: articles.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/clusters?limit=20  – top stories covered by multiple sources
-app.get("/api/clusters", (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 20, 50);
-  try {
-    res.json(getTopClusters(limit));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

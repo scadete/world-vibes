@@ -1,5 +1,5 @@
 const Parser = require("rss-parser");
-const { saveArticles, embedAndCluster } = require("./db");
+const { saveArticles } = require("./db");
 const FEEDS = require("./feeds");
 
 const parser = new Parser({
@@ -83,11 +83,6 @@ async function fetchAll() {
   const summary = results.map((r) => (r.status === "fulfilled" ? r.value : { error: r.reason }));
   const totalSaved = summary.reduce((acc, r) => acc + (r.saved || 0), 0);
   console.log(`\n[WorldVibes] Done. ${totalSaved} new articles saved.\n`);
-
-  // Compute embeddings and run semantic clustering for new articles
-  fetchStatus.phase = "embedding";
-  fetchStatus.currentFeed = "";
-  await embedAndCluster();
 
   fetchStatus.running = false;
   fetchStatus.phase = "";
