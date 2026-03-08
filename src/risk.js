@@ -313,7 +313,7 @@ async function fetchForex() {
           : `${FOREX_COUNTRY[c] || c}: moeda valorizou ${Math.abs(changePct).toFixed(2)}% face ao dólar`,
         level: scoreToLevel(score),
         score,
-        url:      "https://frankfurter.dev",
+        url:      `https://api.frankfurter.app/latest?from=USD&to=${c}`,
         location: FOREX_COUNTRY[c] || c,
         event_at: safeDate(today.date ? today.date + "T12:00:00Z" : null),
       };
@@ -322,28 +322,44 @@ async function fetchForex() {
 }
 
 // ── Doomsday Clock — Bulletin of Atomic Scientists ───────────────────────────
-// Updated manually each January when BAS announces the new setting.
-// Current: 89 seconds to midnight (Jan 2025) — the closest ever recorded.
+// Fallback history — updated manually each January when BAS announces new value.
+// Live value is fetched dynamically from the Wikipedia summary API.
 
 const DOOMSDAY_HISTORY = [
   { year: 2020, seconds: 120 },
   { year: 2023, seconds: 90 },
   { year: 2024, seconds: 90 },
-  { year: 2025, seconds: 89 }, // record — closest to midnight in history
+  { year: 2025, seconds: 89 },
+  { year: 2026, seconds: 85 }, // BAS Jan 2026
 ];
 
 async function fetchDoomsday() {
-  const current = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 1];
-  const prev    = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 2];
-  const s = current.seconds;
+  // Last known value from hardcoded history (used as fallback + trend baseline)
+  const histLast = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 1];
+  let current = histLast;
+
+  // Try live value from Wikipedia summary API (free, no auth)
+  try {
+    const data = await fetch(
+      "https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock",
+      { signal: AbortSignal.timeout(10000) }
+    ).then((r) => r.json());
+    const match = (data.extract || "").match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+    if (match) {
+      const live = parseInt(match[1], 10);
+      if (live >= 10 && live <= 3600) {
+        current = { year: new Date().getFullYear(), seconds: live };
+      }
+    }
+  } catch { /* fall back to hardcoded */ }
+
+  const s     = current.seconds;
   const score = s < 60 ? 4 : s < 120 ? 3 : s < 180 ? 2 : 1;
 
   let trend = "";
-  if (prev) {
-    if (s < prev.seconds)      trend = ` ▼ -${prev.seconds - s}s vs ${prev.year}`;
-    else if (s > prev.seconds) trend = ` ▲ +${s - prev.seconds}s vs ${prev.year}`;
-    else                       trend = ` = sem alteração vs ${prev.year}`;
-  }
+  if (s < histLast.seconds)      trend = ` ▼ -${histLast.seconds - s}s vs ${histLast.year}`;
+  else if (s > histLast.seconds) trend = ` ▲ +${s - histLast.seconds}s vs ${histLast.year}`;
+  else                           trend = ` = sem alteração vs ${histLast.year}`;
 
   return [{
     guid:        `doomsday-${current.year}`,
@@ -353,7 +369,7 @@ async function fetchDoomsday() {
     description: "Boletim dos Cientistas Atómicos — avaliação anual do risco existencial global",
     level:       scoreToLevel(score),
     score,
-    url:         "https://thebulletin.org/doomsday-clock/",
+    url:         "https://thebulletin.org/doomsday-clock/current-time/",
     location:    "Global",
     event_at:    safeDate(`${current.year}-01-15T00:00:00Z`),
   }];
@@ -392,7 +408,7 @@ function computePizzaIndex(signals) {
     description: desc,
     level:       scoreToLevel(score),
     score,
-    url:         "https://en.wikipedia.org/wiki/Pentagon_pizza_index",
+    url:         null,
     location:    "Global",
     event_at:    new Date().toISOString(),
   };

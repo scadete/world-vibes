@@ -278,6 +278,13 @@
       transition: color 0.1s, border-color 0.1s;
     }
     .risk-sources-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .risk-more-btn {
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      font-family: var(--font); font-size: 0.75rem; cursor: pointer;
+      padding: 0.25rem 0.6rem; margin-top: 0.3rem; width: 100%;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .risk-more-btn:hover { border-color: var(--accent2); color: var(--accent); }
 
     /* ── Risk Modal ── */
     .risk-modal-overlay {
@@ -290,16 +297,14 @@
       padding: 1rem 1.25rem; max-width: 540px; width: calc(100% - 2rem); font-size: 0.78rem;
     }
     .risk-modal-header, .risk-modal-footer { color: var(--accent2); font-size: 0.75rem; overflow: hidden; white-space: nowrap; }
-    .risk-modal-body { margin: 0.5rem 0; }
-    .risk-modal-row {
-      display: flex; gap: 0.5rem; padding: 0.25rem 0;
-      border-bottom: 1px solid var(--border);
-    }
+    .risk-modal-body { margin: 0.5rem 0; max-height: 55vh; overflow-y: auto; }
+    .risk-modal-row { padding: 0.4rem 0; border-bottom: 1px solid var(--border); }
     .risk-modal-row:last-child { border-bottom: none; }
-    .rm-source { color: var(--accent); width: 5.5rem; flex-shrink: 0; font-weight: bold; }
-    .rm-desc   { flex: 1; color: var(--text-muted); }
-    .rm-count  { color: var(--text); text-align: right; white-space: nowrap; }
+    .rm-row-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem; }
+    .rm-source { color: var(--accent); font-weight: bold; font-size: 0.78rem; }
+    .rm-count  { color: var(--text); font-size: 0.72rem; white-space: nowrap; flex-shrink: 0; }
     .rm-meta   { color: var(--text-muted); font-style: italic; }
+    .rm-desc   { color: var(--text-muted); font-size: 0.7rem; margin-top: 0.15rem; }
     .rm-has-error .rm-source { color: #ff5555; }
     .rm-error  { font-size: 0.65rem; color: #ff5555; margin-top: 0.1rem; opacity: 0.85; }
     button.risk-modal-footer {
@@ -844,35 +849,65 @@
     }
 
     const rows = sources.map(s => {
-      const n = s.signal_count || 0;
+      const n     = s.signal_count || 0;
       const label = n === 1 ? '1 sinal' : `${n} sinais`;
-      const when = s.last_fetched_at ? relativeTime(s.last_fetched_at) : 'nunca';
+      const when  = s.last_fetched_at ? relativeTime(s.last_fetched_at) : 'nunca';
       const errHtml = s.last_error
         ? `<div class="rm-error">⚠ ${escHtml(s.last_error.slice(0, 80))}</div>`
         : '';
       return `<div class="risk-modal-row${s.last_error ? ' rm-has-error' : ''}">
-        <span class="rm-source">${escHtml(s.source)}</span>
-        <span class="rm-desc">${escHtml(s.description)}${errHtml}</span>
-        <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
+        <div class="rm-row-top">
+          <span class="rm-source">${escHtml(s.source)}</span>
+          <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
+        </div>
+        <div class="rm-desc">${escHtml(s.description)}</div>
+        ${errHtml}
       </div>`;
     }).join('');
 
     body.innerHTML = `
-      <div class="risk-modal-row" style="color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.4rem;margin-bottom:0.2rem">
+      <div class="risk-modal-row" style="padding:0.3rem 0;color:var(--text-muted);border-bottom:1px solid var(--border)">
         última consulta: ${since || '—'}
       </div>${rows}`;
+  }
+
+  const RISK_PAGE_SIZE = 5;
+  let _riskSignals = [];
+
+  function renderRiskSignals(signals, limit) {
+    const list = document.getElementById('riskList');
+    list.innerHTML = '';
+    signals.slice(0, limit).forEach(sig => {
+      const item = document.createElement('div');
+      item.className = 'risk-item' + (sig.url ? ' risk-item-link' : '');
+      item.innerHTML = `
+        <span class="risk-badge ${escHtml(sig.level)}">[${escHtml(sig.level)}]</span>
+        <div>
+          <div class="risk-title">${escHtml(sig.title)}</div>
+          <div class="risk-meta">${escHtml(sig.source)} · ${escHtml(sig.location || '—')} · ${relativeTime(sig.event_at)}</div>
+        </div>`;
+      if (sig.url) item.addEventListener('click', () => window.open(sig.url, '_blank'));
+      list.appendChild(item);
+    });
+    if (signals.length > limit) {
+      const remaining = signals.length - limit;
+      const btn = document.createElement('button');
+      btn.className = 'risk-more-btn';
+      btn.textContent = `[ + ${remaining} mais ]`;
+      btn.onclick = () => renderRiskSignals(signals, limit + RISK_PAGE_SIZE);
+      list.appendChild(btn);
+    }
   }
 
   async function loadRiskSignals() {
     const list = document.getElementById('riskList');
     try {
       const resp = await (await fetch('/api/risk-signals')).json();
-      // Handle both old (array) and new ({ signals, meta }) format
       const signals = Array.isArray(resp) ? resp : (resp.signals || []);
       const meta    = Array.isArray(resp) ? { last_fetch: null, sources: [] } : (resp.meta || { last_fetch: null, sources: [] });
 
-      // Always set _riskMeta so modal has data to show
-      _riskMeta = meta;
+      _riskMeta    = meta;
+      _riskSignals = signals;
 
       if (!signals.length) {
         const sourceNames = (meta.sources || []).map(s => s.source).join(' · ') || '—';
@@ -883,21 +918,8 @@
         return;
       }
 
-      list.innerHTML = '';
-      signals.forEach(sig => {
-        const item = document.createElement('div');
-        item.className = 'risk-item';
-        item.innerHTML = `
-          <span class="risk-badge ${escHtml(sig.level)}">[${escHtml(sig.level)}]</span>
-          <div>
-            <div class="risk-title">${escHtml(sig.title)}</div>
-            <div class="risk-meta">${escHtml(sig.source)} · ${escHtml(sig.location || '—')} · ${relativeTime(sig.event_at)}</div>
-          </div>`;
-        if (sig.url) item.addEventListener('click', () => window.open(sig.url, '_blank'));
-        list.appendChild(item);
-      });
+      renderRiskSignals(signals, RISK_PAGE_SIZE);
     } catch {
-      // Preserve any existing _riskMeta so modal still shows previous state
       if (!_riskMeta) _riskMeta = { last_fetch: null, sources: [] };
       list.innerHTML = '<div class="risk-empty">[ erro ao carregar sinais OSINT ]</div>';
     }
