@@ -1,4 +1,4 @@
-const CACHE = 'wv-v4';
+const CACHE = 'wv-v5';
 const SHELL = [
   '/',
   '/index.html',

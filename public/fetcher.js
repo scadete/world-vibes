@@ -113,7 +113,31 @@ export async function fetchFeed(feed, proxyBase) {
   const url = `${proxyBase}?url=${encodeURIComponent(feed.url)}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
+
+  const buffer = await res.arrayBuffer();
+
+  // Detect charset from Content-Type header (e.g. "text/xml; charset=ISO-8859-1")
+  const contentType = res.headers.get('Content-Type') || '';
+  const ctCharset = contentType.match(/charset=([^\s;]+)/i)?.[1] || 'utf-8';
+
+  // Decode with Content-Type charset first so we can read the XML declaration
+  let text;
+  try {
+    text = new TextDecoder(ctCharset).decode(buffer);
+  } catch {
+    text = new TextDecoder('utf-8').decode(buffer);
+  }
+
+  // XML declaration may override: <?xml version="1.0" encoding="ISO-8859-1"?>
+  const xmlEncoding = text.match(/<\?xml[^>]+encoding=["']([^"']+)["']/i)?.[1];
+  if (xmlEncoding && xmlEncoding.toLowerCase() !== ctCharset.toLowerCase()) {
+    try {
+      text = new TextDecoder(xmlEncoding).decode(buffer);
+    } catch {
+      // keep the already-decoded text
+    }
+  }
+
   return parseXML(text, feed);
 }
 
