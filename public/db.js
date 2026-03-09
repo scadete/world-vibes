@@ -185,17 +185,19 @@ export async function getStats() {
     let total = 0;
     const by_category = {};
     const by_language = {};
+    const by_feed = {};
 
     req.onsuccess = e => {
       const cursor = e.target.result;
       if (!cursor) {
-        resolve({ total, by_category, by_language });
+        resolve({ total, by_category, by_language, by_feed });
         return;
       }
       const a = cursor.value;
       total++;
       by_category[a.category] = (by_category[a.category] || 0) + 1;
       by_language[a.language] = (by_language[a.language] || 0) + 1;
+      by_feed[a.feed_name] = (by_feed[a.feed_name] || 0) + 1;
       cursor.continue();
     };
     req.onerror = () => reject(req.error);
