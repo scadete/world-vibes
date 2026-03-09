@@ -617,7 +617,8 @@
     setTimeout(() => el.classList.remove('show'), duration);
   }
 
-  function relativeTime(dateStr) {
+  // articleAge: minute-level precision for article cards
+  function articleAge(dateStr) {
     if (!dateStr) return '';
     const diff = Date.now() - new Date(dateStr).getTime();
     const m = Math.floor(diff / 60000);
@@ -627,6 +628,17 @@
     if (h < 24) return `${h}h atrás`;
     const d = Math.floor(h / 24);
     return `${d}d atrás`;
+  }
+
+  // relativeTime: hour-level precision for risk signals and OSINT metadata
+  function relativeTime(isoStr) {
+    if (!isoStr) return '—';
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const h = Math.floor(diff / 3600000);
+    if (h < 1)  return 'há menos de 1h';
+    if (h < 24) return `há ${h}h`;
+    const d = Math.floor(h / 24);
+    return `há ${d}d`;
   }
 
   function escHtml(s) {
@@ -707,7 +719,7 @@
       <div class="card-meta">
         <span class="badge">${escHtml(a.category)}</span>
         ${a.source_count >= 2 ? `<span class="cluster-badge" title="${a.source_count} fontes">[${a.source_count}x]</span>` : ''}
-        <span class="date">${relativeTime(a.pub_date)}</span>
+        <span class="date">${articleAge(a.pub_date)}</span>
       </div>
       <div class="card-title"><a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a></div>
       ${a.description ? `<div class="card-desc">${escHtml(a.description)}</div>` : ''}
@@ -740,7 +752,7 @@
         item.className = 'related-item';
         item.innerHTML = `
           <a href="${escHtml(a.link)}" target="_blank" rel="noopener">${escHtml(a.title)}</a>
-          <div class="related-meta">${escHtml(a.feed_name)} · ${relativeTime(a.pub_date)}</div>
+          <div class="related-meta">${escHtml(a.feed_name)} · ${articleAge(a.pub_date)}</div>
         `;
         inner.appendChild(item);
       });
@@ -846,15 +858,6 @@
   }
 
   // ── Risk signals ────────────────────────────────────────────────────────────
-  function relativeTime(isoStr) {
-    if (!isoStr) return '—';
-    const diff = Date.now() - new Date(isoStr).getTime();
-    const h = Math.floor(diff / 3600000);
-    if (h < 1)  return 'há menos de 1h';
-    if (h < 24) return `há ${h}h`;
-    const d = Math.floor(h / 24);
-    return `há ${d}d`;
-  }
 
   // ── Risk refresh ─────────────────────────────────────────────────────────────
   async function refreshRiskSignals() {

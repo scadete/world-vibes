@@ -41,7 +41,7 @@ async function fetchWithEncoding(url) {
   const buf = Buffer.from(await res.arrayBuffer());
 
   // XML declaration has highest priority, then Content-Type header
-  const peek = buf.slice(0, 300).toString('ascii');
+  const peek = buf.subarray(0, 300).toString('ascii');
   const xmlEnc = (peek.match(/encoding=["']([^"']+)/i) || [])[1] || '';
   const ct = res.headers.get('content-type') || '';
   const ctEnc = (ct.match(/charset=([^\s;]+)/i) || [])[1] || '';

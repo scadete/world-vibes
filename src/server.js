@@ -21,12 +21,27 @@ app.use(express.json());
 
 // ── In-memory caches for stable/slow-changing endpoints ─────────────────────
 
-let _statsCache = null, _statsExpiry = 0;
-let _catsCache  = null, _catsExpiry  = 0;
+function makeCached(fn, ttlMs) {
+  let cache = null, expiry = 0;
+  return {
+    get() {
+      const now = Date.now();
+      if (!cache || now > expiry) {
+        cache = fn();
+        expiry = now + ttlMs;
+      }
+      return cache;
+    },
+    invalidate() { cache = null; },
+  };
+}
+
+const statsCache = makeCached(getStats,      5 * 60 * 1000);  // 5 minutes
+const catsCache  = makeCached(getCategories, 60 * 60 * 1000); // 1 hour
 
 function invalidateCaches() {
-  _statsCache = null;
-  _catsCache  = null;
+  statsCache.invalidate();
+  catsCache.invalidate();
 }
 
 // ── API routes ──────────────────────────────────────────────────────────────
@@ -51,22 +66,12 @@ app.get("/api/articles", (req, res) => {
 
 // GET /api/categories  – cached 1 hour (changes only when new feeds added)
 app.get("/api/categories", (req, res) => {
-  const now = Date.now();
-  if (!_catsCache || now > _catsExpiry) {
-    _catsCache  = getCategories();
-    _catsExpiry = now + 60 * 60 * 1000;
-  }
-  res.json(_catsCache);
+  res.json(catsCache.get());
 });
 
 // GET /api/stats  – cached 5 minutes
 app.get("/api/stats", (req, res) => {
-  const now = Date.now();
-  if (!_statsCache || now > _statsExpiry) {
-    _statsCache  = getStats();
-    _statsExpiry = now + 5 * 60 * 1000;
-  }
-  res.json(_statsCache);
+  res.json(statsCache.get());
 });
 
 // GET /api/trending?hours=24

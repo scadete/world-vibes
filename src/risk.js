@@ -1,8 +1,11 @@
 const Parser = require("rss-parser");
 const { saveRiskSignals } = require("./db");
+const OSINT_SOURCES = require("./sources");
+
+const REQUEST_TIMEOUT_MS = 15_000;
 
 const parser = new Parser({
-  timeout: 15000,
+  timeout: REQUEST_TIMEOUT_MS,
   customFields: {
     item: [
       ["gdacs:alertlevel", "alertlevel"],
@@ -12,19 +15,6 @@ const parser = new Parser({
     ],
   },
 });
-
-// ── Source registry ───────────────────────────────────────────────────────────
-
-const SOURCE_META = [
-  { source: "GDACS",     category: "disaster",     description: "Desastres naturais (GDACS/UN-OCHA)" },
-  { source: "WHO",       category: "health",        description: "Surtos de doenças (OMS)" },
-  { source: "ReliefWeb", category: "humanitarian",  description: "Crises humanitárias (OCHA)" },
-  { source: "IODA",      category: "internet",      description: "Interrupções de internet (Georgia Tech)" },
-  { source: "USGS",      category: "seismic",       description: "Actividade sísmica (USGS)" },
-  { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
-  { source: "FOREX",     category: "economic",      description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
-  { source: "DOOMSDAY",  category: "geopolitical",  description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
-];
 
 // ── Level helpers ─────────────────────────────────────────────────────────────
 
@@ -42,6 +32,14 @@ function safeDate(val) {
   } catch {
     return new Date().toISOString();
   }
+}
+
+// NOAA issue_datetime is "YYYY-MM-DD HH:MM:SS.mmm" (space, no T, no timezone)
+function noaaToISO(dt) {
+  if (!dt) return null;
+  // Trim any surrounding whitespace, then replace the date/time separator space with T
+  const s = dt.trim().replace(' ', 'T');
+  return s.endsWith('Z') || /[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z';
 }
 
 // ── GDACS — Natural disasters ─────────────────────────────────────────────────
@@ -105,7 +103,8 @@ async function fetchReliefWeb() {
     "&fields[include][]=glide&fields[include][]=country" +
     "&fields[include][]=type&fields[include][]=date";
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
 
   return (json.data || []).map((item) => {
@@ -143,7 +142,8 @@ async function fetchIODA() {
     `https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts` +
     `?from=${from}&until=${now}&entityType=country`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
 
   const alerts = (json.data || {}).alerts || [];
@@ -163,9 +163,7 @@ async function fetchIODA() {
         score,
         url: `https://ioda.inetintel.cc.gatech.edu/country/${a.entityCode}`,
         location: countryName,
-        event_at: safeDate(
-          a.startTime ? new Date(a.startTime * 1000).toISOString() : null
-        ),
+        event_at: safeDate(a.startTime ? a.startTime * 1000 : null),
       };
     });
 }
@@ -175,7 +173,8 @@ async function fetchIODA() {
 async function fetchUSGS() {
   const url =
     "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_week.geojson";
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
 
   const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
@@ -205,7 +204,7 @@ async function fetchUSGS() {
         score,
         url: p.url || null,
         location: place,
-        event_at: safeDate(p.time ? new Date(p.time).toISOString() : null),
+        event_at: safeDate(p.time),
       };
     });
 }
@@ -214,16 +213,9 @@ async function fetchUSGS() {
 
 async function fetchNOAA() {
   const url = "https://services.swpc.noaa.gov/products/alerts.json";
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const json = await res.json();
-
-  // NOAA issue_datetime is "YYYY-MM-DD HH:MM:SS.mmm" (space, no T, no timezone)
-  function noaaToISO(dt) {
-    if (!dt) return null;
-    // Replace space with T and append Z if no timezone present
-    const s = dt.replace(' ', 'T');
-    return s.endsWith('Z') || /[+-]\d\d:\d\d$/.test(s) ? s : s + 'Z';
-  }
 
   const cutoff = Date.now() - 48 * 3600 * 1000;
   return (Array.isArray(json) ? json : [])
@@ -281,9 +273,15 @@ async function fetchForex() {
 
   const [today, prev] = await Promise.all([
     fetch(`https://api.frankfurter.app/latest?from=USD&to=${sym}`,
-      { signal: AbortSignal.timeout(15000) }).then((r) => r.json()),
+      { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
     fetch(`https://api.frankfurter.app/${prevDate}?from=USD&to=${sym}`,
-      { signal: AbortSignal.timeout(15000) }).then((r) => r.json()),
+      { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      }),
   ]);
 
   const todayRates = today.rates || {};
@@ -342,7 +340,7 @@ async function fetchDoomsday() {
   try {
     const data = await fetch(
       "https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock",
-      { signal: AbortSignal.timeout(10000) }
+      { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
     ).then((r) => r.json());
     const match = (data.extract || "").match(/(\d+)\s*seconds?\s+to\s+midnight/i);
     if (match) {
@@ -416,16 +414,32 @@ function computePizzaIndex(signals) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
+// Maps each source key to its fetcher function — explicit, not positional.
+const FETCHER_MAP = {
+  GDACS:     fetchGDACS,
+  WHO:       fetchWHO,
+  ReliefWeb: fetchReliefWeb,
+  IODA:      fetchIODA,
+  USGS:      fetchUSGS,
+  NOAA:      fetchNOAA,
+  FOREX:     fetchForex,
+  DOOMSDAY:  fetchDoomsday,
+};
+
 async function fetchRiskSignals() {
   console.log("[risk] Fetching OSINT risk signals…");
-  const fetchers = [fetchGDACS, fetchWHO, fetchReliefWeb, fetchIODA, fetchUSGS, fetchNOAA, fetchForex, fetchDoomsday];
-  const results = await Promise.allSettled(fetchers.map((f) => f()));
+
+  // Primary sources: all except PIZZA (which is a computed composite)
+  const primarySources = OSINT_SOURCES.filter((s) => s.source !== "PIZZA");
+  const results = await Promise.allSettled(
+    primarySources.map(({ source }) => FETCHER_MAP[source]())
+  );
 
   const signals = [];
   const logEntries = [];
 
   results.forEach((r, i) => {
-    const meta = SOURCE_META[i];
+    const meta = primarySources[i];
     const items = r.status === "fulfilled" ? r.value : [];
     signals.push(...items);
     logEntries.push({
@@ -443,16 +457,11 @@ async function fetchRiskSignals() {
   // Pentagon Pizza Index — derived composite; always present, computed last
   const pizzaSignal = computePizzaIndex(signals);
   signals.push(pizzaSignal);
-  logEntries.push({
-    source:       "PIZZA",
-    category:     "geopolitical",
-    description:  "Pentagon Pizza Index — stress geopolítico composto",
-    signal_count: 1,
-    last_error:   null,
-  });
+  const pizzaMeta = OSINT_SOURCES.find((s) => s.source === "PIZZA");
+  logEntries.push({ ...pizzaMeta, signal_count: 1, last_error: null });
 
   saveRiskSignals(signals, logEntries);
-  console.log(`[risk] ${signals.length} signals saved across ${SOURCE_META.length + 1} sources.`);
+  console.log(`[risk] ${signals.length} signals saved across ${OSINT_SOURCES.length} sources.`);
   return signals;
 }
 
