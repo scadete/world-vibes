@@ -674,7 +674,7 @@
   }
 
   // ── Fetch articles ──────────────────────────────────────────────────────────
-  async function loadArticles(append = false) {
+  async function loadArticles(append = false, silent = false) {
     if (state.loading) return;
 
     // Cluster view: render articles directly from worker data, no API call
@@ -690,7 +690,7 @@
 
     const el = document.getElementById('articles');
     if (!append) {
-      showSkeletons();
+      if (!silent) showSkeletons();
       state.offset = 0;
     }
 
@@ -1097,7 +1097,7 @@
       await setMeta('last_fetch', new Date().toISOString());
 
       bar.textContent = `[ concluído — ${saved} novo${saved !== 1 ? 's' : ''} artigo${saved !== 1 ? 's' : ''} ]`;
-      await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters(), loadCategories()]);
+      await Promise.all([loadStats(), loadArticles(false, true), loadTrending(), loadClusters(), loadCategories()]);
       toast(`[ feeds actualizados — ${saved} novo${saved !== 1 ? 's' : ''} ]`);
       setTimeout(() => bar.classList.remove('visible'), 4000);
     } catch (e) {
