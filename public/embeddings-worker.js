@@ -58,23 +58,33 @@ self.onmessage = async ({ data: { articles } }) => {
     const db = await openDB();
 
     self.postMessage({ type: 'status', msg: 'A inicializar modelo…' });
-    const pipe = await pipeline(
-      'feature-extraction',
-      'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-      {
-        progress_callback: (info) => {
-          if (info.status === 'downloading') {
-            self.postMessage({
-              type: 'download',
-              file: info.file,
-              progress: Math.round(info.progress || 0),
-            });
-          } else if (info.status === 'initiate') {
-            self.postMessage({ type: 'status', msg: 'A inicializar modelo (primeira vez: ~430MB)…' });
-          }
-        },
+    const progressCb = (info) => {
+      if (info.status === 'downloading') {
+        self.postMessage({
+          type: 'download',
+          file: info.file,
+          progress: Math.round(info.progress || 0),
+        });
+      } else if (info.status === 'initiate') {
+        self.postMessage({ type: 'status', msg: 'A inicializar modelo (primeira vez: ~430MB)…' });
       }
-    );
+    };
+    let pipe;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        pipe = await pipeline(
+          'feature-extraction',
+          'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+          { progress_callback: progressCb }
+        );
+        break;
+      } catch (modelErr) {
+        if (attempt === 2) throw modelErr;
+        const delay = 2000 * Math.pow(2, attempt);
+        self.postMessage({ type: 'status', msg: `Erro ao carregar modelo — nova tentativa em ${delay / 1000}s…` });
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
 
     self.postMessage({ type: 'status', msg: 'A analisar artigos…' });
 
@@ -155,6 +165,11 @@ self.onmessage = async ({ data: { articles } }) => {
     self.postMessage({ type: 'clusters', data: clusters });
 
   } catch (err) {
-    self.postMessage({ type: 'error', msg: `${err.name}: ${err.message}` });
+    const isModelFetchError = err instanceof SyntaxError ||
+      (err.message && (err.message.includes('JSON') || err.message.includes('Unexpected token')));
+    const friendlyMsg = isModelFetchError
+      ? 'modelo de IA indisponível — verifique sua conexão e tente novamente'
+      : `${err.name}: ${err.message}`;
+    self.postMessage({ type: 'error', msg: friendlyMsg });
   }
 };

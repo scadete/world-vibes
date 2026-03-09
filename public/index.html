@@ -1037,7 +1037,8 @@
         } else if (msg.type === 'clusters') {
           renderClusters(msg.data);
         } else if (msg.type === 'error') {
-          list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ]</div>`;
+          list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ] <button id="retryHighlights" style="margin-left:8px;cursor:pointer;background:none;border:1px solid currentColor;padding:2px 6px;border-radius:3px;font-size:inherit">↺ tentar novamente</button></div>`;
+          document.getElementById('retryHighlights')?.addEventListener('click', loadClusters);
           console.error('[clusters] worker error:', msg.msg);
         }
       };
