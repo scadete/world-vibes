@@ -594,7 +594,19 @@
 
 <div id="toast"></div>
 
-<script>
+<script type="module">
+  import { openDB, getArticles, getCategories, getStats, getTrending,
+           saveArticles, saveRiskSignals, getRiskSignals,
+           getMeta, setMeta, pruneOld, pruneRiskSignals } from '/db.js';
+  import { fetchAll } from '/fetcher.js';
+  import { fetchRiskSignals, SOURCE_META } from '/risk-sources.js';
+
+  // ── Config ──────────────────────────────────────────────────────────────────
+  // Change to your deployed Worker URL for production.
+  const PROXY = typeof WV_PROXY !== 'undefined' ? WV_PROXY
+    : 'http://localhost:8787/proxy';
+  const FETCH_INTERVAL = 30 * 60 * 1000; // 30 min
+
   const PAGE_SIZE = 48;
   // Restore persisted filters
   const _savedState = JSON.parse(localStorage.getItem('wv-state') || '{}');
@@ -681,29 +693,26 @@
       state.offset = 0;
     }
 
-    const params = new URLSearchParams({
-      category: state.category,
-      language: state.language,
-      hours:    48,
-      limit:    PAGE_SIZE,
-      offset:   state.offset,
-    });
-    if (state.search) params.set('search', state.search);
-
     try {
-      const res = await fetch(`/api/articles?${params}`);
-      const data = await res.json();
+      const articles = await getArticles({
+        category: state.category !== 'all' ? state.category : undefined,
+        language: state.language !== 'all' ? state.language : undefined,
+        search:   state.search || undefined,
+        hours:    48,
+        limit:    PAGE_SIZE,
+        offset:   state.offset,
+      });
 
       if (!append) el.innerHTML = '';
 
-      if (data.articles.length === 0 && !append) {
+      if (articles.length === 0 && !append) {
         el.innerHTML = '<div class="empty"><h2>Nenhum artigo encontrado</h2><p>Tente actualizar os feeds ou mudar os filtros.</p></div>';
         document.getElementById('loadMoreWrap').style.display = 'none';
       } else {
-        data.articles.forEach(a => el.appendChild(makeCard(a)));
-        state.offset += data.articles.length;
+        articles.forEach(a => el.appendChild(makeCard(a)));
+        state.offset += articles.length;
         document.getElementById('loadMoreWrap').style.display =
-          data.articles.length < PAGE_SIZE ? 'none' : 'block';
+          articles.length < PAGE_SIZE ? 'none' : 'block';
       }
     } catch (e) {
       el.innerHTML = `<div class="empty"><h2>Erro ao carregar</h2><p>${escHtml(e.message)}</p></div>`;
@@ -815,43 +824,24 @@
   }
 
   async function loadCategories() {
-    const LS_KEY = 'wv-cats', LS_TS = 'wv-cats-ts';
-    const TTL = 3600_000;
-    let cats = null;
-    try { cats = JSON.parse(localStorage.getItem(LS_KEY)); } catch {}
-    const ts = +localStorage.getItem(LS_TS) || 0;
-    const stale = Date.now() - ts > TTL;
-
-    if (cats) {
+    try {
+      const cats = await getCategories();
       renderCatButtons(cats);
-      if (stale) {
-        // Background revalidation
-        fetch('/api/categories').then(r => r.json()).then(fresh => {
-          localStorage.setItem(LS_KEY, JSON.stringify(fresh));
-          localStorage.setItem(LS_TS, Date.now());
-          renderCatButtons(fresh);
-        }).catch(() => {});
-      }
-    } else {
-      try {
-        cats = await (await fetch('/api/categories')).json();
-        localStorage.setItem(LS_KEY, JSON.stringify(cats));
-        localStorage.setItem(LS_TS, Date.now());
-        renderCatButtons(cats);
-      } catch { /* ignore */ }
-    }
+    } catch { /* ignore */ }
   }
 
   // ── Stats ───────────────────────────────────────────────────────────────────
   async function loadStats() {
     try {
-      const s = await (await fetch('/api/stats')).json();
-      const last = s.lastFetch ? new Date(s.lastFetch).toLocaleString() : 'never';
+      const [s, lastFetch] = await Promise.all([getStats(), getMeta('last_fetch')]);
+      const last = lastFetch ? new Date(lastFetch).toLocaleString() : 'never';
+      const langStr = Object.entries(s.by_language)
+        .map(([lang, count]) => `${lang.toUpperCase()}:${count}`).join(' ');
+      const catCount = Object.keys(s.by_category).length;
       document.getElementById('statsBar').innerHTML = `
         <span><strong>${s.total.toLocaleString()}</strong> artigos</span>
-        <span><strong>${s.byCategory.length}</strong> categorias</span>
-        <span><strong>${s.byLanguage.map(l=>`${l.language.toUpperCase()}:${l.count}`).join(' ')}</strong></span>
-        ${s.clusters && s.clusters.multiSource > 0 ? `<span><strong>${s.clusters.multiSource}</strong> clusters</span>` : ''}
+        <span><strong>${catCount}</strong> categorias</span>
+        <span><strong>${langStr}</strong></span>
         <span>sync: <strong>${last}</strong></span>
       `;
     } catch { /* ignore */ }
@@ -865,7 +855,10 @@
     btn.textContent = '[ ... ]';
     btn.disabled = true;
     try {
-      await fetch('/api/fetch-risk', { method: 'POST' });
+      const { signals, log } = await fetchRiskSignals(PROXY);
+      await saveRiskSignals(signals);
+      await setMeta('last_risk_fetch', new Date().toISOString());
+      await setMeta('risk_log', log);
       await loadRiskSignals();
     } catch { /* ignore network errors */ }
     finally {
@@ -953,18 +946,20 @@
   async function loadRiskSignals() {
     const list = document.getElementById('riskList');
     try {
-      const resp = await (await fetch('/api/risk-signals')).json();
-      const signals = Array.isArray(resp) ? resp : (resp.signals || []);
-      const meta    = Array.isArray(resp) ? { last_fetch: null, sources: [] } : (resp.meta || { last_fetch: null, sources: [] });
+      const [signals, lastFetch, log] = await Promise.all([
+        getRiskSignals(),
+        getMeta('last_risk_fetch'),
+        getMeta('risk_log'),
+      ]);
 
-      _riskMeta    = meta;
+      _riskMeta    = { last_fetch: lastFetch, sources: log || [] };
       _riskSignals = signals;
 
       if (!signals.length) {
-        const sourceNames = (meta.sources || []).map(s => s.source).join(' · ') || '—';
-        const since = meta.last_fetch ? relativeTime(meta.last_fetch) : '—';
+        const sourceNames = SOURCE_META.map(s => s.source).join(' · ');
+        const since = lastFetch ? relativeTime(lastFetch) : '—';
         list.innerHTML = `
-          <div class="risk-empty">[ nenhum sinal detectado nas últimas 72h ]</div>
+          <div class="risk-empty">[ nenhum sinal detectado ]</div>
           <div class="risk-empty" style="margin-top:0.2rem">fontes consultadas ${since}: ${escHtml(sourceNames)}</div>`;
         return;
       }
@@ -1018,9 +1013,8 @@
     list.innerHTML = '<div class="no-highlights">[ a inicializar análise semântica… ]</div>';
 
     try {
-      // Fetch a broader article set for cross-source clustering
-      const data = await (await fetch('/api/articles?hours=48&limit=150')).json();
-      const articles = data.articles || [];
+      // Load a broader article set for cross-source clustering
+      const articles = await getArticles({ hours: 48, limit: 150 });
       if (!articles.length) {
         list.innerHTML = '<div class="no-highlights">[ sem artigos recentes para análise ]</div>';
         return;
@@ -1059,18 +1053,18 @@
   // ── Trending ────────────────────────────────────────────────────────────────
   async function loadTrending() {
     try {
-      const data = await (await fetch('/api/trending')).json();
+      const data = await getTrending(24);
       if (!data.length) return;
       const container = document.getElementById('trendingTags');
       container.innerHTML = '';
-      data.forEach(({ term, count }) => {
+      data.forEach(({ word, count }) => {
         const tag = document.createElement('button');
         tag.className = 'trending-tag';
-        tag.textContent = `${term} [${count}]`;
+        tag.textContent = `${word} [${count}]`;
         tag.title = `${count} menções nas últimas 24h`;
         tag.addEventListener('click', () => {
-          document.getElementById('searchInput').value = term;
-          state.search = term;
+          document.getElementById('searchInput').value = word;
+          state.search = word;
           updateClearBtn();
           loadArticles();
         });
@@ -1080,55 +1074,57 @@
     } catch { /* ignore */ }
   }
 
-  // ── Manual fetch ────────────────────────────────────────────────────────────
-  let _fetchPollInterval = null;
-
-  function _stopFetchPoll() {
-    if (_fetchPollInterval) { clearInterval(_fetchPollInterval); _fetchPollInterval = null; }
-  }
+  // ── Manual / auto fetch ──────────────────────────────────────────────────────
+  let _fetching = false;
 
   async function triggerFetch() {
+    if (_fetching) return;
+    _fetching = true;
     const btn = document.getElementById('fetchBtn');
     const bar = document.getElementById('fetchStatusBar');
     btn.disabled = true;
     bar.classList.add('visible');
 
     try {
-      await fetch('/api/fetch', { method: 'POST' });
-    } catch {
-      toast('[ erro ao iniciar actualização ]');
-      btn.disabled = false;
+      const { saved, errors } = await fetchAll(PROXY, ({ done, total, currentFeed, totalSaved }) => {
+        const feed = currentFeed ? ` — ${currentFeed}` : '';
+        btn.textContent = `[↻] (${done}/${total})`;
+        bar.textContent = `[ a descarregar feeds... (${done}/${total})${feed} ]`;
+      });
+
+      await setMeta('last_fetch', new Date().toISOString());
+
+      bar.textContent = `[ concluído — ${saved} novo${saved !== 1 ? 's' : ''} artigo${saved !== 1 ? 's' : ''} ]`;
+      await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters(), loadCategories()]);
+      toast(`[ feeds actualizados — ${saved} novo${saved !== 1 ? 's' : ''} ]`);
+      setTimeout(() => bar.classList.remove('visible'), 4000);
+    } catch (e) {
+      toast(`[ erro: ${e.message} ]`);
       bar.classList.remove('visible');
-      return;
     }
 
-    _stopFetchPoll();
-    _fetchPollInterval = setInterval(async () => {
-      try {
-        const s = await (await fetch('/api/fetch-status')).json();
-
-        if (s.phase === 'fetching') {
-          const feed = s.currentFeed ? ` — ${s.currentFeed}` : '';
-          btn.textContent = `[↻] feeds... (${s.done}/${s.total})`;
-          bar.textContent = `[ a descarregar feeds... (${s.done}/${s.total})${feed} ]`;
-        } else if (s.phase === 'embedding') {
-          btn.textContent = '[↻] analisando...';
-          bar.textContent = '[ a calcular similaridades semânticas... ]';
-        } else if (!s.running) {
-          _stopFetchPoll();
-          const saved = s.totalSaved;
-          bar.textContent = `[ concluído — ${saved} novo${saved !== 1 ? 's' : ''} artigo${saved !== 1 ? 's' : ''} ]`;
-          await Promise.all([loadStats(), loadArticles(), loadTrending(), loadClusters(), loadRiskSignals()]);
-          toast(`[ feeds actualizados — ${saved} novo${saved !== 1 ? 's' : ''} ]`);
-          btn.disabled = false;
-          btn.textContent = '[↻] Refresh';
-          setTimeout(() => bar.classList.remove('visible'), 4000);
-        }
-      } catch {
-        // network hiccup — keep polling
-      }
-    }, 1000);
+    btn.disabled = false;
+    btn.textContent = '[↻] Refresh';
+    _fetching = false;
   }
+
+  async function maybeAutoFetch() {
+    const last = await getMeta('last_fetch');
+    if (!last || Date.now() - new Date(last).getTime() > FETCH_INTERVAL) {
+      triggerFetch();
+    }
+  }
+
+  // ── Expose global functions for inline onclick handlers ──────────────────────
+  window.applySearch        = applySearch;
+  window.clearFilters       = clearFilters;
+  window.setFilter          = setFilter;
+  window.loadMore           = loadMore;
+  window.triggerFetch       = triggerFetch;
+  window.refreshRiskSignals = refreshRiskSignals;
+  window.openRiskModal      = openRiskModal;
+  window.closeRiskModal     = closeRiskModal;
+  window.installApp         = installApp;
 
   // ── Init — restore active filter buttons from persisted state ───────────────
   if (state.language !== 'all') {
@@ -1138,16 +1134,21 @@
   }
   updateClearBtn();
 
-  // ── Init — articles first, everything else in parallel ──────────────────────
-  showSkeletons();
-  Promise.all([
-    loadArticles(),
-    loadCategories(),
-    loadStats(),
-    loadTrending(),
-    loadClusters(),
-    loadRiskSignals(),
-  ]);
+  // ── Init — open DB, prune old data, load UI, auto-fetch if stale ─────────────
+  (async () => {
+    await openDB();
+    await Promise.all([pruneOld(7), pruneRiskSignals(3)]);
+    showSkeletons();
+    await Promise.all([
+      loadArticles(),
+      loadCategories(),
+      loadStats(),
+      loadTrending(),
+      loadClusters(),
+      loadRiskSignals(),
+    ]);
+    maybeAutoFetch();
+  })();
 
   // ── PWA — apple-touch-icon via canvas (iOS) ──────────────────────────────
   (function () {

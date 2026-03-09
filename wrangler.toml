@@ -1,0 +1,6 @@
+name = "world-vibes-proxy"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+
+# Deploy with: npx wrangler deploy
+# Dev with:    npx wrangler dev

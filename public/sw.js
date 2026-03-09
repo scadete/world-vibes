@@ -1,5 +1,15 @@
-const CACHE = 'wv-v2';
-const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.json'];
+const CACHE = 'wv-v3';
+const SHELL = [
+  '/',
+  '/index.html',
+  '/icon.svg',
+  '/manifest.json',
+  '/feeds.js',
+  '/risk-sources.js',
+  '/db.js',
+  '/fetcher.js',
+  '/embeddings-worker.js',
+];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -16,25 +26,8 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-
-  if (url.pathname.startsWith('/api/')) {
-    // Stale-while-revalidate for API — respond immediately with cache, update in background
-    e.respondWith(staleWhileRevalidate(e.request));
-  } else {
-    // Cache-first for shell assets
-    e.respondWith(
-      caches.match(e.request).then(r => r || fetch(e.request))
-    );
-  }
+  // Cache-first for all shell assets (HTML, JS, icons)
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request))
+  );
 });
-
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(CACHE);
-  const cached = await cache.match(request);
-  const fetchPromise = fetch(request).then(res => {
-    if (res.ok) cache.put(request, res.clone());
-    return res;
-  }).catch(() => null);
-  return cached || fetchPromise;
-}
