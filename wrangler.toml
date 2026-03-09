@@ -1,4 +1,4 @@
-name = "world-vibes-proxy"
+name = "worldvibe"
 main = "worker/index.js"
 compatibility_date = "2025-01-01"
 
