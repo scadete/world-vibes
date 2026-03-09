@@ -601,6 +601,7 @@
            getMeta, setMeta, pruneOld, pruneRiskSignals } from '/db.js';
   import { fetchAll } from '/fetcher.js';
   import { fetchRiskSignals, SOURCE_META } from '/risk-sources.js';
+  import { FEEDS } from '/feeds.js';
 
   // ── Config ──────────────────────────────────────────────────────────────────
   // Change to your deployed Worker URL for production.
@@ -836,13 +837,13 @@
     try {
       const [s, lastFetch] = await Promise.all([getStats(), getMeta('last_fetch')]);
       const last = lastFetch ? new Date(lastFetch).toLocaleString() : 'never';
-      const langStr = Object.entries(s.by_language)
-        .map(([lang, count]) => `${lang.toUpperCase()}:${count}`).join(' ');
       const catCount = Object.keys(s.by_category).length;
+      const feedCount = Object.keys(s.by_feed).length;
+      _feedStats = s.by_feed;
       document.getElementById('statsBar').innerHTML = `
         <span><strong>${s.total.toLocaleString()}</strong> artigos</span>
         <span><strong>${catCount}</strong> categorias</span>
-        <span><strong>${langStr}</strong></span>
+        <span><strong>${feedCount}</strong> feeds <button class="risk-sources-btn" onclick="openFeedsModal()" title="Ver feeds carregados">[≡]</button></span>
         <span>sync: <strong>${last}</strong></span>
       `;
     } catch { /* ignore */ }
@@ -880,8 +881,6 @@
   function closeRiskModal() {
     document.getElementById('riskModalOverlay').classList.remove('open');
   }
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRiskModal(); });
-
   function renderRiskModal(meta) {
     const body = document.getElementById('riskModalBody');
     const sources = (meta && meta.sources) || [];
@@ -914,6 +913,40 @@
       <div class="risk-modal-row" style="padding:0.3rem 0;color:var(--text-muted);border-bottom:1px solid var(--border)">
         última consulta: ${since || '—'}
       </div>${rows}`;
+  }
+
+  // ── Feeds modal ───────────────────────────────────────────────────────────────
+  let _feedStats = {};
+
+  function openFeedsModal() {
+    renderFeedsModal(_feedStats);
+    document.getElementById('feedsModalOverlay').classList.add('open');
+  }
+  function closeFeedsModal() {
+    document.getElementById('feedsModalOverlay').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeRiskModal(); closeFeedsModal(); } });
+
+  function renderFeedsModal(byFeed) {
+    const body = document.getElementById('feedsModalBody');
+    const entries = Object.entries(byFeed).sort(([, a], [, b]) => b - a);
+    if (!entries.length) {
+      body.innerHTML = `<div class="risk-modal-row" style="color:var(--text-muted)">[ nenhum feed carregado ]</div>`;
+      return;
+    }
+    const FEED_META = Object.fromEntries(FEEDS.map(f => [f.name, f]));
+    body.innerHTML = entries.map(([name, count]) => {
+      const label = count === 1 ? '1 artigo' : `${count} artigos`;
+      const meta = FEED_META[name];
+      const desc = meta ? `${meta.category} · ${meta.language.toUpperCase()}` : '';
+      return `<div class="risk-modal-row">
+        <div class="rm-row-top">
+          <span class="rm-source">${escHtml(name)}</span>
+          <span class="rm-count">${label}</span>
+        </div>
+        ${desc ? `<div class="rm-desc">${escHtml(desc)}</div>` : ''}
+      </div>`;
+    }).join('');
   }
 
   const RISK_PAGE_SIZE = 5;
@@ -1134,6 +1167,8 @@
   window.refreshRiskSignals = refreshRiskSignals;
   window.openRiskModal      = openRiskModal;
   window.closeRiskModal     = closeRiskModal;
+  window.openFeedsModal     = openFeedsModal;
+  window.closeFeedsModal    = closeFeedsModal;
   window.installApp         = installApp;
 
   // ── Init — restore active filter buttons from persisted state ───────────────
@@ -1210,6 +1245,15 @@
     <div class="risk-modal-header">╔══ FONTES OSINT CONSULTADAS ══════════════════════════════╗</div>
     <div class="risk-modal-body" id="riskModalBody">[ a carregar... ]</div>
     <button class="risk-modal-footer" onclick="closeRiskModal()" title="Fechar modal">╚══ [×] fechar ══════════════════════════════════════════╝</button>
+  </div>
+</div>
+
+<!-- Feeds Modal -->
+<div class="risk-modal-overlay" id="feedsModalOverlay" onclick="closeFeedsModal()">
+  <div class="risk-modal" onclick="event.stopPropagation()">
+    <div class="risk-modal-header">╔══ FEEDS CARREGADOS ═════════════════════════════════════╗</div>
+    <div class="risk-modal-body" id="feedsModalBody">[ a carregar... ]</div>
+    <button class="risk-modal-footer" onclick="closeFeedsModal()" title="Fechar modal">╚══ [×] fechar ══════════════════════════════════════════╝</button>
   </div>
 </div>
 </body>
