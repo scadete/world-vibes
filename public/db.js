@@ -5,7 +5,7 @@
 
 const DB_NAME = 'world-vibes';
 const DB_VERSION = 1;
-const PRUNE_DAYS = 7;
+const PRUNE_DAYS = 3;
 
 let _db = null;
 
