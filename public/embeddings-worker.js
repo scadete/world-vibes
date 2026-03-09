@@ -52,7 +52,7 @@ self.onmessage = async ({ data: { articles } }) => {
   try {
     self.postMessage({ type: 'status', msg: 'A carregar biblioteca…' });
     const { pipeline, env } = await import('/lib/transformers.min.js');
-    env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/';
+    env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
 
     self.postMessage({ type: 'status', msg: 'A abrir cache local…' });
     const db = await openDB();
