@@ -1,6 +1,7 @@
 const Database = require("better-sqlite3");
 const path = require("path");
 const fs = require("fs");
+const OSINT_SOURCES = require("./sources");
 
 const DB_PATH = path.join(__dirname, "..", "data", "news.db");
 
@@ -81,21 +82,10 @@ db.exec(`
 
 // Pre-seed risk_fetch_log so the modal always shows all sources, even before first fetch
 try {
-  const _osintSources = [
-    { source: "GDACS",     category: "disaster",    description: "Desastres naturais (GDACS/UN-OCHA)" },
-    { source: "WHO",       category: "health",       description: "Surtos de doenças (OMS)" },
-    { source: "ReliefWeb", category: "humanitarian", description: "Crises humanitárias (OCHA)" },
-    { source: "IODA",      category: "internet",     description: "Interrupções de internet (Georgia Tech)" },
-    { source: "USGS",      category: "seismic",      description: "Actividade sísmica (USGS)" },
-    { source: "NOAA",      category: "space",        description: "Clima espacial (NOAA/SWPC)" },
-    { source: "FOREX",     category: "economic",     description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
-    { source: "DOOMSDAY",  category: "geopolitical", description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
-    { source: "PIZZA",     category: "geopolitical", description: "Pentagon Pizza Index — stress geopolítico composto" },
-  ];
   const _seedStmt = db.prepare(
     "INSERT OR IGNORE INTO risk_fetch_log (source, category, description, signal_count) VALUES (@source, @category, @description, 0)"
   );
-  db.transaction(() => { for (const s of _osintSources) _seedStmt.run(s); })();
+  db.transaction(() => { for (const s of OSINT_SOURCES) _seedStmt.run(s); })();
 } catch { /* non-fatal: table might not exist yet on very first run */ }
 
 // Add cluster_id column to articles if not yet present (idempotent migration)
