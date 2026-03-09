@@ -48,8 +48,17 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+const FRONTEND_URL = 'https://world-vibes.pages.dev';
+
 export default {
   async fetch(request) {
+    const { pathname, searchParams } = new URL(request.url);
+
+    // Redirect root and non-proxy paths to the frontend app
+    if (pathname === '/' || pathname === '') {
+      return Response.redirect(FRONTEND_URL, 302);
+    }
+
     // Handle CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: CORS_HEADERS });
@@ -59,7 +68,6 @@ export default {
       return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
     }
 
-    const { searchParams } = new URL(request.url);
     const target = searchParams.get('url');
 
     if (!target) {
