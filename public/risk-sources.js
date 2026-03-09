@@ -387,7 +387,7 @@ async function fetchDoomsday(proxyBase) {
     score,
     url:         'https://thebulletin.org/doomsday-clock/current-time/',
     location:    'Global',
-    event_at:    safeDate(`${current.year}-01-15T00:00:00Z`),
+    event_at:    new Date().toISOString(),
   }];
 }
 
