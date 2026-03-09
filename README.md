@@ -1,65 +1,133 @@
-# 🌍 WorldVibes – RSS News Aggregator
+# WorldVibes — RSS News Aggregator
 
-A lightweight, self-hosted RSS news aggregator that pulls from international sources and presents them in a clean dark-mode web UI.
+Agregador de notícias globais com análise de risco OSINT, clustering semântico e suporte a PWA. Arquitectura 100% estática — sem servidor, sem base de dados.
 
-## Features
+## Arquitectura
 
-- **12+ international feeds** – BBC, Reuters, Al Jazeera, NPR, The Guardian, DW, France 24, Folha, G1, El País, Ars Technica, Hacker News
-- **Multi-language support** – English, Portuguese, Spanish
-- **Filter by category or language**
-- **Full-text search** across titles and descriptions
-- **Auto-refresh** every 30 minutes (configurable)
-- **Manual refresh** button in the UI
-- **SQLite storage** – zero external database dependencies
-- **Pagination** – load-more for large result sets
+```
+Browser
+  ├── Fetch feeds RSS/APIs OSINT → Cloudflare Worker (proxy CORS)
+  ├── Parse RSS/Atom com DOMParser
+  ├── Avalia risk scores (GDACS, WHO, USGS, NOAA, …)
+  ├── Persiste artigos em IndexedDB (7 dias)
+  ├── Clustering semântico via Web Worker (Transformers.js)
+  └── Auto-refresh a cada 30 min (ou manual)
 
-## Quick Start
+Cloudflare Worker  →  proxy CORS para feeds externos e APIs OSINT
+Cloudflare Pages   →  serve public/ como SPA (sem build step)
+```
+
+## Estrutura
+
+```
+public/
+  index.html            SPA principal
+  feeds.js              Lista dos 22 feeds RSS (ES module)
+  risk-sources.js       Fontes OSINT + scoring 1-4 no browser
+  db.js                 Camada IndexedDB (artigos, risk signals, meta)
+  fetcher.js            Fetch + parse RSS/Atom no browser
+  sw.js                 Service Worker (PWA, cache offline)
+  embeddings-worker.js  Clustering semântico (Transformers.js)
+  manifest.json         PWA manifest
+  icon.svg              Ícone
+worker/
+  index.js              Cloudflare Worker — proxy CORS
+wrangler.toml           Config do Worker
+package.json            Só wrangler como devDependency
+```
+
+## Desenvolvimento local
+
+**Pré-requisito:** Node.js (qualquer versão recente)
 
 ```bash
 npm install
-npm start
 ```
 
-Open http://localhost:3000
-
-### Fetch feeds manually (CLI)
+**Terminal 1 — proxy CORS** (porta 8787):
 
 ```bash
-npm run fetch
+npx wrangler dev
 ```
 
-## Configuration
+**Terminal 2 — frontend** (qualquer servidor estático):
 
-### Adding/removing feeds
+```bash
+npx serve public
+# ou
+python3 -m http.server 8080 --directory public
+```
 
-Edit `src/feeds.js` – each feed entry has:
+Abrir [http://localhost:8080](http://localhost:8080).
 
-| Field      | Description                             |
-|------------|-----------------------------------------|
-| `name`     | Display name                            |
-| `url`      | RSS/Atom feed URL                       |
-| `category` | Category label shown in the UI          |
-| `language` | ISO 639-1 code (`en`, `pt`, `es`, …)   |
+> Quando `window.WV_PROXY` não está definido, o frontend usa automaticamente `http://localhost:8787/proxy`.
 
-### Environment variables
+## Deploy
 
-| Variable | Default | Description         |
-|----------|---------|---------------------|
-| `PORT`   | `3000`  | HTTP port to listen |
+### 1. Worker (proxy CORS)
 
-## API
+```bash
+npx wrangler login   # autenticar no Cloudflare (só uma vez)
+npx wrangler deploy  # publica worker/index.js
+```
 
-| Method | Path            | Description                        |
-|--------|-----------------|------------------------------------|
-| GET    | `/api/articles` | Paginated articles (query params: `category`, `language`, `search`, `limit`, `offset`) |
-| GET    | `/api/categories` | List of distinct categories      |
-| GET    | `/api/stats`    | Aggregate stats                    |
-| POST   | `/api/fetch`    | Trigger immediate feed refresh     |
+O worker fica disponível em `https://worldvibe.scadete.workers.dev`.
+O URL já está configurado em `public/index.html` (`window.WV_PROXY`).
 
-## Stack
+### 2. Frontend (Cloudflare Pages)
 
-- **Node.js** + **Express** – HTTP server
-- **rss-parser** – RSS/Atom parsing
-- **better-sqlite3** – local persistence
-- **node-cron** – scheduled fetches
-- Vanilla HTML/CSS/JS frontend (no build step)
+**Opção A — via GitHub** (recomendado — deploy automático a cada push):
+
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages → Create → Pages → Connect to Git**
+2. Seleccionar o repositório `scadete/world-vibes`
+3. Configurar:
+
+   | Campo | Valor |
+   |---|---|
+   | Branch de produção | `claude/rss-news-aggregator-95J0U` |
+   | Build command | *(vazio)* |
+   | Build output directory | `public` |
+
+4. Clicar **Save and Deploy**
+
+**Opção B — via CLI:**
+
+```bash
+npx wrangler pages deploy public --project-name world-vibes
+```
+
+## Verificação após deploy
+
+1. Abrir o URL do Pages
+2. DevTools → Console → sem erros de CORS
+3. Clicar **[↻] Refresh** → artigos carregam em ~30s
+4. Clicar **[↻]** nos alertas OSINT → sinais de risco aparecem
+
+## Adicionar feeds
+
+Editar `public/feeds.js` — adicionar ao array `FEEDS`:
+
+```js
+{
+  name: 'Nome do feed',
+  url: 'https://exemplo.com/rss.xml',
+  category: 'Categoria',
+  language: 'pt',   // 'en' | 'pt' | 'es'
+}
+```
+
+Adicionar o domínio à allowlist em `worker/index.js` (`ALLOWED_DOMAINS`).
+
+## Fontes OSINT
+
+| Fonte | Categoria | Tipo |
+|---|---|---|
+| GDACS | Desastres naturais | RSS |
+| WHO | Surtos de doenças | RSS |
+| ReliefWeb | Crises humanitárias | REST API |
+| IODA | Interrupções de internet | REST API |
+| USGS | Actividade sísmica | GeoJSON |
+| NOAA/SWPC | Clima espacial | JSON |
+| Frankfurter | Stress cambial (USD) | REST API |
+| Wikipedia | Relógio do Apocalipse | REST API |
+| Pizza Index | Stress geopolítico composto | Derivado |
