@@ -1015,7 +1015,7 @@
 
     try {
       // Load a broader article set for cross-source clustering
-      const articles = await getArticles({ hours: 48, limit: 150 });
+      const articles = await getArticles({ hours: 24, limit: 100 });
       if (!articles.length) {
         list.innerHTML = '<div class="no-highlights">[ sem artigos recentes para análise ]</div>';
         return;
