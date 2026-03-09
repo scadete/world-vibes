@@ -36,6 +36,7 @@ const ALLOWED_DOMAINS = new Set([
   'www.who.int',
   'api.reliefweb.int',
   'ioda.inetintel.cc.gatech.edu',
+  'api.ioda.inetintel.cc.gatech.edu',
   'earthquake.usgs.gov',
   'services.swpc.noaa.gov',
   'api.frankfurter.app',

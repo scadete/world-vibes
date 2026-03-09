@@ -1117,6 +1117,14 @@
     }
   }
 
+  async function maybeAutoFetchRisk() {
+    const last = await getMeta('last_risk_fetch');
+    const RISK_INTERVAL = 60 * 60 * 1000; // 1 hour
+    if (!last || Date.now() - new Date(last).getTime() > RISK_INTERVAL) {
+      refreshRiskSignals();
+    }
+  }
+
   // ── Expose global functions for inline onclick handlers ──────────────────────
   window.applySearch        = applySearch;
   window.clearFilters       = clearFilters;
@@ -1150,6 +1158,7 @@
       loadRiskSignals(),
     ]);
     maybeAutoFetch();
+    maybeAutoFetchRisk();
   })();
 
   // ── PWA — apple-touch-icon via canvas (iOS) ──────────────────────────────
