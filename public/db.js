@@ -156,6 +156,49 @@ export async function getArticles(opts = {}) {
   });
 }
 
+/**
+ * Return up to maxTotal articles, taking at most perSource from each feed,
+ * ordered by pub_date descending.
+ * @param {object} opts
+ * @param {number} [opts.hours=48]
+ * @param {number} [opts.perSource=10]
+ * @param {number} [opts.maxTotal=200]
+ */
+export async function getArticlesPerSource(opts = {}) {
+  const { hours = 48, perSource = 10, maxTotal = 200 } = opts;
+
+  const db = await openDB();
+  const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('articles', 'readonly');
+    const index = tx.objectStore('articles').index('pub_date');
+    const results = [];
+    const countPerSource = {};
+
+    const range = IDBKeyRange.lowerBound(cutoff);
+    const req = index.openCursor(range, 'prev');
+
+    req.onsuccess = e => {
+      const cursor = e.target.result;
+      if (!cursor || results.length >= maxTotal) { resolve(results); return; }
+
+      const a = cursor.value;
+      const src = a.feed_name || '';
+      const count = countPerSource[src] || 0;
+
+      if (count < perSource) {
+        countPerSource[src] = count + 1;
+        results.push(a);
+      }
+
+      cursor.continue();
+    };
+
+    req.onerror = () => reject(req.error);
+  });
+}
+
 /** Return all distinct categories from stored articles */
 export async function getCategories() {
   const db = await openDB();

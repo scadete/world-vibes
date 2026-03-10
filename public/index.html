@@ -596,7 +596,7 @@
 
 <script>window.WV_PROXY = 'https://worldvibe.scadete.workers.dev/proxy';</script>
 <script type="module">
-  import { openDB, getArticles, getCategories, getStats, getTrending,
+  import { openDB, getArticles, getArticlesPerSource, getCategories, getStats, getTrending,
            saveArticles, saveRiskSignals, getRiskSignals,
            getMeta, setMeta, pruneOld, pruneRiskSignals } from '/db.js';
   import { fetchAll } from '/fetcher.js';
@@ -1048,7 +1048,7 @@
 
     try {
       // Load a broader article set for cross-source clustering
-      const articles = await getArticles({ hours: 24, limit: 100 });
+      const articles = await getArticlesPerSource({ hours: 48, perSource: 10, maxTotal: 200 });
       if (!articles.length) {
         list.innerHTML = '<div class="no-highlights">[ sem artigos recentes para análise ]</div>';
         return;
