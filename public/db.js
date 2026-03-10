@@ -324,17 +324,17 @@ export async function saveRiskSignals(signals) {
   });
 }
 
-/** Get all risk signals sorted by score desc, event_at desc */
+/** Get risk signals from the last 5 days, sorted by event_at desc (latest changes first) */
 export async function getRiskSignals() {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('risk_signals', 'readonly');
     const req = tx.objectStore('risk_signals').getAll();
     req.onsuccess = () => {
-      const signals = req.result.sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.event_at > a.event_at ? 1 : -1;
-      });
+      const cutoff = new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString();
+      const signals = req.result
+        .filter(s => s.event_at >= cutoff)
+        .sort((a, b) => b.event_at > a.event_at ? 1 : b.event_at < a.event_at ? -1 : 0);
       resolve(signals);
     };
     req.onerror = () => reject(req.error);

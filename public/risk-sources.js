@@ -343,39 +343,143 @@ async function fetchForex(proxyBase) {
 
 // ── Doomsday Clock ────────────────────────────────────────────────────────────
 
-const DOOMSDAY_HISTORY = [
-  { year: 2020, seconds: 120 },
-  { year: 2023, seconds: 90 },
-  { year: 2024, seconds: 90 },
-  { year: 2025, seconds: 89 },
-  { year: 2026, seconds: 85 },
+// Known announcement dates for fallback (Bulletin of Atomic Scientists, January each year)
+const DOOMSDAY_KNOWN = [
+  { year: 2023, seconds: 90,  date: '2023-01-24' },
+  { year: 2024, seconds: 90,  date: '2024-01-23' },
+  { year: 2025, seconds: 89,  date: '2025-01-28' },
+  { year: 2026, seconds: 85,  date: '2026-01-28' },
 ];
+const DOOMSDAY_FALLBACK = {
+  current:  DOOMSDAY_KNOWN[DOOMSDAY_KNOWN.length - 1],
+  previous: DOOMSDAY_KNOWN[DOOMSDAY_KNOWN.length - 2],
+};
+
+/**
+ * Try to extract an ISO date string from bulletin.org HTML.
+ * Checks meta tags, JSON-LD datePublished, <time> elements, and text patterns.
+ */
+function extractBulletinDate(html) {
+  // meta property="article:published_time" or similar
+  const metaM = html.match(/<meta[^>]+(?:article:published_time|article:modified_time|date)[^>]+content=["']([0-9T:Z.+-]{10,})/i)
+             || html.match(/content=["']([0-9]{4}-[0-9]{2}-[0-9]{2})[^"']*["'][^>]+(?:article:published_time|date)/i);
+  if (metaM) {
+    const d = new Date(metaM[1]);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  // JSON-LD datePublished / dateModified
+  const jsonLdBlocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const [, inner] of jsonLdBlocks) {
+    try {
+      const data = JSON.parse(inner);
+      const dp = data.datePublished || data.dateModified || (Array.isArray(data['@graph']) && data['@graph'].find(n => n.datePublished)?.datePublished);
+      if (dp) {
+        const d = new Date(dp);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+      }
+    } catch { /* continue */ }
+  }
+
+  // <time datetime="...">
+  const timeM = html.match(/<time[^>]+datetime=["']([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+  if (timeM) return timeM[1];
+
+  // Text pattern "January 28, 2026" / "28 January 2026"
+  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const textM = html.match(new RegExp(`(${months})\\s+(\\d{1,2}),?\\s+(20\\d{2})`, 'i'))
+             || html.match(new RegExp(`(\\d{1,2})\\s+(${months}),?\\s+(20\\d{2})`, 'i'));
+  if (textM) {
+    const d = new Date(textM[0]);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
+/**
+ * Parse current and previous clock times from thebulletin.org HTML.
+ * Returns { current: {year, seconds, date?}, previous: {year, seconds, date?} } or null.
+ */
+function parseBulletinOrg(html) {
+  const announcedDate = extractBulletinDate(html);
+
+  // Try JSON-LD for the time value
+  const jsonLdBlocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const [, inner] of jsonLdBlocks) {
+    try {
+      const text = JSON.stringify(JSON.parse(inner));
+      const m = text.match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+      if (m) {
+        const s = parseInt(m[1], 10);
+        if (s >= 10 && s <= 3600) {
+          return { current: { year: new Date().getFullYear(), seconds: s, date: announcedDate }, previous: null };
+        }
+      }
+    } catch { /* continue */ }
+  }
+
+  // Extract all "X seconds to midnight" occurrences in order of appearance
+  const allMatches = [...html.matchAll(/(\d+)\s*seconds?\s+to\s+midnight/gi)];
+  const times = allMatches
+    .map(m => parseInt(m[1], 10))
+    .filter(s => s >= 10 && s <= 3600);
+
+  if (!times.length) return null;
+
+  const currentYear = new Date().getFullYear();
+  const previousYear = currentYear - 1;
+  const prevSeconds = times.find(s => s !== times[0]) ?? null;
+
+  return {
+    current:  { year: currentYear, seconds: times[0], date: announcedDate },
+    previous: prevSeconds ? { year: previousYear, seconds: prevSeconds } : null,
+  };
+}
 
 async function fetchDoomsday(proxyBase) {
-  const histLast = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 1];
-  let current = histLast;
+  let result = null;
 
+  // Primary: thebulletin.org
   try {
-    const data = await proxyFetch(
+    const html = await proxyFetch(
       proxyBase,
-      'https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock'
-    ).then(r => r.json());
-    const match = (data.extract || '').match(/(\d+)\s*seconds?\s+to\s+midnight/i);
-    if (match) {
-      const live = parseInt(match[1], 10);
-      if (live >= 10 && live <= 3600) {
-        current = { year: new Date().getFullYear(), seconds: live };
+      'https://thebulletin.org/doomsday-clock/current-time/'
+    ).then(r => r.text());
+    result = parseBulletinOrg(html);
+  } catch { /* try fallback */ }
+
+  // Secondary: Wikipedia
+  if (!result) {
+    try {
+      const data = await proxyFetch(
+        proxyBase,
+        'https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock'
+      ).then(r => r.json());
+      const match = (data.extract || '').match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+      if (match) {
+        const live = parseInt(match[1], 10);
+        if (live >= 10 && live <= 3600) {
+          result = { current: { year: new Date().getFullYear(), seconds: live, date: null }, previous: null };
+        }
       }
-    }
-  } catch { /* fall back to hardcoded */ }
+    } catch { /* fall back to hardcoded */ }
+  }
+
+  const { current, previous } = result || DOOMSDAY_FALLBACK;
+  const prev = previous || DOOMSDAY_FALLBACK.previous;
 
   const s     = current.seconds;
   const score = s < 60 ? 4 : s < 120 ? 3 : s < 180 ? 2 : 1;
 
   let trend = '';
-  if (s < histLast.seconds)      trend = ` ▼ -${histLast.seconds - s}s vs ${histLast.year}`;
-  else if (s > histLast.seconds) trend = ` ▲ +${s - histLast.seconds}s vs ${histLast.year}`;
-  else                           trend = ` = sem alteração vs ${histLast.year}`;
+  if (s < prev.seconds)      trend = ` ▼ -${prev.seconds - s}s vs ${prev.year}`;
+  else if (s > prev.seconds) trend = ` ▲ +${s - prev.seconds}s vs ${prev.year}`;
+  else                       trend = ` = sem alteração vs ${prev.year}`;
+
+  // Use the actual announcement date; fall back to known dates table, then January of that year
+  const knownEntry = DOOMSDAY_KNOWN.find(e => e.year === current.year);
+  const announcedDate = current.date || knownEntry?.date || `${current.year}-01-15`;
 
   return [{
     guid:        `doomsday-${current.year}`,
@@ -387,43 +491,8 @@ async function fetchDoomsday(proxyBase) {
     score,
     url:         'https://thebulletin.org/doomsday-clock/current-time/',
     location:    'Global',
-    event_at:    new Date().toISOString(),
+    event_at:    `${announcedDate}T12:00:00Z`,
   }];
-}
-
-// ── Pizza Index ───────────────────────────────────────────────────────────────
-
-function computePizzaIndex(signals) {
-  const criticos = signals.filter(s => s.score >= 4).length;
-  const altos    = signals.filter(s => s.score === 3).length;
-  const medios   = signals.filter(s => s.score === 2).length;
-
-  const pts    = criticos * 2 + altos + medios * 0.5;
-  const slices = Math.min(5, Math.round(pts));
-
-  const [label, desc] =
-    slices === 0 ? ['×0 — linha base',      'sem sinais relevantes activos'] :
-    slices === 1 ? ['×1 — pré-alerta',      `${signals.length} sinal(is) de baixa intensidade`] :
-    slices === 2 ? ['×2 — tensão moderada', `${altos} alerta(s) alto(s), ${medios} médio(s)`] :
-    slices === 3 ? ['×3 — meia pizza',      `${criticos} alerta(s) crítico(s) activo(s)`] :
-    slices === 4 ? ['×4 — crise activa',    'múltiplos alertas críticos — resposta em curso'] :
-                   ['×5 — caos total',      'todos os níveis de alerta activos simultaneamente'];
-
-  const score = slices === 0 ? 1 : slices <= 2 ? 2 : slices <= 3 ? 3 : 4;
-  const today = new Date().toISOString().split('T')[0];
-
-  return {
-    guid:        `pizza-${today}`,
-    source:      'PIZZA',
-    category:    'geopolitical',
-    title:       `🍕 Pentagon Pizza Index: ${label}`,
-    description: desc,
-    level:       scoreToLevel(score),
-    score,
-    url:         null,
-    location:    'Global',
-    event_at:    new Date().toISOString(),
-  };
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -455,18 +524,6 @@ export async function fetchRiskSignals(proxyBase) {
         ? (r.reason?.message || String(r.reason)).slice(0, 200)
         : null,
     });
-  });
-
-  // Pizza Index — derived composite
-  const pizza = computePizzaIndex(signals);
-  signals.push(pizza);
-  log.push({
-    source:          'PIZZA',
-    category:        'geopolitical',
-    description:     'Pentagon Pizza Index — stress geopolítico composto',
-    signal_count:    1,
-    last_fetched_at: new Date().toISOString(),
-    last_error:      null,
   });
 
   return { signals, log };
