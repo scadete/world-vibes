@@ -131,6 +131,8 @@
       font-size: 0.8rem;
       font-family: var(--font);
       transition: color 0.1s, border-color 0.1s;
+      height: 2rem;
+      line-height: 1;
     }
     button.btn:hover { border-color: var(--accent2); color: var(--accent); }
     button.btn.active { border-color: var(--accent); color: var(--accent); background: #001a00; }
@@ -141,6 +143,7 @@
     }
     button.btn-fetch:hover { background: #002a00; }
     button.btn-fetch:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.btn-config { font-size: 1rem; padding: 0 0.6rem; }
 
     button.btn-clear {
       background: #1a0000;
@@ -150,6 +153,8 @@
       cursor: pointer;
       font-size: 0.8rem;
       font-family: var(--font);
+      height: 2rem;
+      line-height: 1;
       display: none;
     }
     button.btn-clear.visible { display: inline-block; }
@@ -533,6 +538,7 @@
     <button class="btn" id="installBtn" style="display:none" onclick="installApp()">[+] Install</button>
     <button class="btn btn-fetch" id="fetchBtn" onclick="triggerFetch()">[↻] Refresh</button>
     <button class="btn-clear" id="clearFiltersBtn" onclick="clearFilters()">[x] Clear</button>
+    <button class="btn btn-config" id="configBtn" onclick="openConfigModal()" title="Configuration">&#9965;</button>
   </div>
 </header>
 <div class="fetch-status-bar" id="fetchStatusBar"></div>
@@ -925,7 +931,13 @@
   function closeFeedsModal() {
     document.getElementById('feedsModalOverlay').classList.remove('open');
   }
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeRiskModal(); closeFeedsModal(); } });
+  function openConfigModal() {
+    document.getElementById('configModalOverlay').classList.add('open');
+  }
+  function closeConfigModal() {
+    document.getElementById('configModalOverlay').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeRiskModal(); closeFeedsModal(); closeConfigModal(); } });
 
   function renderFeedsModal(byFeed) {
     const body = document.getElementById('feedsModalBody');
@@ -1179,6 +1191,8 @@
   window.closeRiskModal     = closeRiskModal;
   window.openFeedsModal     = openFeedsModal;
   window.closeFeedsModal    = closeFeedsModal;
+  window.openConfigModal    = openConfigModal;
+  window.closeConfigModal   = closeConfigModal;
   window.installApp         = installApp;
 
   // ── Init — restore active filter buttons from persisted state ───────────────
@@ -1264,6 +1278,15 @@
     <div class="risk-modal-header">╔══ FEEDS CARREGADOS ═════════════════════════════════════╗</div>
     <div class="risk-modal-body" id="feedsModalBody">[ a carregar... ]</div>
     <button class="risk-modal-footer" onclick="closeFeedsModal()" title="Fechar modal">╚══ [×] fechar ══════════════════════════════════════════╝</button>
+  </div>
+</div>
+
+<!-- Config Modal -->
+<div class="risk-modal-overlay" id="configModalOverlay" onclick="closeConfigModal()">
+  <div class="risk-modal" onclick="event.stopPropagation()">
+    <div class="risk-modal-header">╔══ CONFIGURATION ════════════════════════════════════════╗</div>
+    <div class="risk-modal-body" style="text-align:center; padding: 1.5rem 0; color: var(--text-muted);">soon</div>
+    <button class="risk-modal-footer" onclick="closeConfigModal()" title="Close">╚══ [×] close ═══════════════════════════════════════════╝</button>
   </div>
 </div>
 </body>
