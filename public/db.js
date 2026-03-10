@@ -267,6 +267,7 @@ export async function getTrending(hours = 24) {
     'em','no','na','nos','nas','por','para','com','ao','à','aos','às',
     'que','se','não','é','foi','são','está','ser','ter','e','ou','mas',
     'mais','já','ele','ela','eles','elas','seu','sua','seus','suas',
+    'como','anos','apos','pela','feira','leia','segunda','clique','veja',
     // ES
     'el','la','los','las','un','una','del','al','con','por','para','que',
     'en','no','es','son','fue','han','una','está','se','su','sus',
