@@ -1260,6 +1260,17 @@
   // ── PWA — Service Worker ──────────────────────────────────────────────────
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+    // When the SW controller changes (skipWaiting activated a new SW), reload
+    // the page via JavaScript so iOS WebKit uses our controlled reload path
+    // instead of its own internal navigation, which can misfire as a double
+    // reload ending in "permanently-removed.invalid".
+    let _swReloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_swReloading) return;
+      _swReloading = true;
+      window.location.reload();
+    });
   }
 </script>
 
