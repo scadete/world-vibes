@@ -41,6 +41,7 @@ const ALLOWED_DOMAINS = new Set([
   'services.swpc.noaa.gov',
   'api.frankfurter.app',
   'en.wikipedia.org',
+  'www.doomsdayclock.net',
 ]);
 
 const CORS_HEADERS = {

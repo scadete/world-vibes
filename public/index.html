@@ -1192,7 +1192,7 @@
   // ── Init — open DB, prune old data, load UI, auto-fetch if stale ─────────────
   (async () => {
     await openDB();
-    await Promise.all([pruneOld(7), pruneRiskSignals(3)]);
+    await Promise.all([pruneOld(7), pruneRiskSignals(5)]);
     showSkeletons();
     await Promise.all([
       loadArticles(),

@@ -343,39 +343,81 @@ async function fetchForex(proxyBase) {
 
 // ── Doomsday Clock ────────────────────────────────────────────────────────────
 
-const DOOMSDAY_HISTORY = [
-  { year: 2020, seconds: 120 },
-  { year: 2023, seconds: 90 },
-  { year: 2024, seconds: 90 },
-  { year: 2025, seconds: 89 },
-  { year: 2026, seconds: 85 },
-];
+const DOOMSDAY_FALLBACK = { current: { year: 2026, seconds: 85 }, previous: { year: 2025, seconds: 89 } };
+
+/**
+ * Parse current and previous clock times from doomsdayclock.net HTML.
+ * Returns { current: {year, seconds}, previous: {year, seconds} } or null.
+ */
+function parseDoomsdayClockNet(html) {
+  // Extract all "X seconds to midnight" occurrences (ordered by appearance)
+  const allMatches = [...html.matchAll(/(\d+)\s*seconds?\s+to\s+midnight/gi)];
+  const times = allMatches
+    .map(m => parseInt(m[1], 10))
+    .filter(s => s >= 10 && s <= 3600);
+
+  if (!times.length) return null;
+
+  const current = times[0];
+
+  // Try to find a year associated with current time
+  const yearNearCurrent = html.match(/(?:current|now|today|(?:20\d{2}))[^<]{0,60}(\d+)\s*seconds?\s+to\s+midnight/i)
+    || html.match(/(\d+)\s*seconds?\s+to\s+midnight[^<]{0,60}(20\d{2})/i);
+
+  // Try to find explicit "previous" or second occurrence
+  const prevSeconds = times.length > 1 ? times[1] : null;
+
+  // Extract years mentioned near the times
+  const yearMatches = [...html.matchAll(/\b(20\d{2})\b/g)].map(m => parseInt(m[1], 10))
+    .filter(y => y >= 2017 && y <= new Date().getFullYear());
+
+  const currentYear = new Date().getFullYear();
+  const previousYear = currentYear - 1;
+
+  return {
+    current:  { year: currentYear, seconds: current },
+    previous: prevSeconds
+      ? { year: previousYear, seconds: prevSeconds }
+      : null,
+  };
+}
 
 async function fetchDoomsday(proxyBase) {
-  const histLast = DOOMSDAY_HISTORY[DOOMSDAY_HISTORY.length - 1];
-  let current = histLast;
+  let result = null;
 
+  // Primary: doomsdayclock.net
   try {
-    const data = await proxyFetch(
-      proxyBase,
-      'https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock'
-    ).then(r => r.json());
-    const match = (data.extract || '').match(/(\d+)\s*seconds?\s+to\s+midnight/i);
-    if (match) {
-      const live = parseInt(match[1], 10);
-      if (live >= 10 && live <= 3600) {
-        current = { year: new Date().getFullYear(), seconds: live };
+    const html = await proxyFetch(proxyBase, 'https://www.doomsdayclock.net/').then(r => r.text());
+    result = parseDoomsdayClockNet(html);
+  } catch { /* try fallback */ }
+
+  // Secondary: Wikipedia
+  if (!result) {
+    try {
+      const data = await proxyFetch(
+        proxyBase,
+        'https://en.wikipedia.org/api/rest_v1/page/summary/Doomsday_Clock'
+      ).then(r => r.json());
+      const match = (data.extract || '').match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+      if (match) {
+        const live = parseInt(match[1], 10);
+        if (live >= 10 && live <= 3600) {
+          result = { current: { year: new Date().getFullYear(), seconds: live }, previous: null };
+        }
       }
-    }
-  } catch { /* fall back to hardcoded */ }
+    } catch { /* fall back to hardcoded */ }
+  }
+
+  const { current, previous } = result || DOOMSDAY_FALLBACK;
+  const prev = previous || DOOMSDAY_FALLBACK.previous;
 
   const s     = current.seconds;
   const score = s < 60 ? 4 : s < 120 ? 3 : s < 180 ? 2 : 1;
 
   let trend = '';
-  if (s < histLast.seconds)      trend = ` ▼ -${histLast.seconds - s}s vs ${histLast.year}`;
-  else if (s > histLast.seconds) trend = ` ▲ +${s - histLast.seconds}s vs ${histLast.year}`;
-  else                           trend = ` = sem alteração vs ${histLast.year}`;
+  if (s < prev.seconds)      trend = ` ▼ -${prev.seconds - s}s vs ${prev.year}`;
+  else if (s > prev.seconds) trend = ` ▲ +${s - prev.seconds}s vs ${prev.year}`;
+  else                       trend = ` = sem alteração vs ${prev.year}`;
 
   return [{
     guid:        `doomsday-${current.year}`,
@@ -385,7 +427,7 @@ async function fetchDoomsday(proxyBase) {
     description: 'Boletim dos Cientistas Atómicos — avaliação anual do risco existencial global',
     level:       scoreToLevel(score),
     score,
-    url:         'https://thebulletin.org/doomsday-clock/current-time/',
+    url:         'https://www.doomsdayclock.net/',
     location:    'Global',
     event_at:    new Date().toISOString(),
   }];
@@ -457,17 +499,19 @@ export async function fetchRiskSignals(proxyBase) {
     });
   });
 
-  // Pizza Index — derived composite
-  const pizza = computePizzaIndex(signals);
-  signals.push(pizza);
-  log.push({
-    source:          'PIZZA',
-    category:        'geopolitical',
-    description:     'Pentagon Pizza Index — stress geopolítico composto',
-    signal_count:    1,
-    last_fetched_at: new Date().toISOString(),
-    last_error:      null,
-  });
+  // Pizza Index — derived composite (only if at least one dynamic source returned data)
+  if (signals.length > 0) {
+    const pizza = computePizzaIndex(signals);
+    signals.push(pizza);
+    log.push({
+      source:          'PIZZA',
+      category:        'geopolitical',
+      description:     'Pentagon Pizza Index — stress geopolítico composto',
+      signal_count:    1,
+      last_fetched_at: new Date().toISOString(),
+      last_error:      null,
+    });
+  }
 
   return { signals, log };
 }
