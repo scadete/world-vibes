@@ -1,4 +1,4 @@
-const CACHE = 'wv-v5';
+const CACHE = 'wv-v6';
 const SHELL = [
   '/',
   '/index.html',
@@ -13,15 +13,18 @@ const SHELL = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
-  self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(SHELL))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    )
   );
 });
 
@@ -35,7 +38,13 @@ self.addEventListener('fetch', e => {
   // cached /index.html as fallback so the SPA loads even when offline.
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match('/index.html'))
+      fetch(e.request).catch(async () => {
+        const cached = await caches.match('/index.html');
+        return cached ?? new Response(
+          '<!doctype html><title>Offline</title><p>Offline — please reconnect.</p>',
+          { status: 503, headers: { 'Content-Type': 'text/html' } }
+        );
+      })
     );
     return;
   }
