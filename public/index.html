@@ -899,12 +899,30 @@
       const errHtml = s.last_error
         ? `<div class="rm-error">⚠ ${escHtml(s.last_error.slice(0, 80))}</div>`
         : '';
+      const pizzaHelpBtn = s.source === 'PIZZA'
+        ? `<button onclick="var d=this.closest('.risk-modal-row').querySelector('.pizza-explain');d.hidden=!d.hidden" title="Como é calculado" style="background:none;border:1px solid var(--text-muted);color:var(--text-muted);font-family:var(--font);font-size:0.65rem;cursor:pointer;padding:0 0.35rem;line-height:1.5;flex-shrink:0">?</button>`
+        : '';
+      const pizzaExplain = s.source === 'PIZZA'
+        ? `<div class="pizza-explain" hidden style="font-size:0.67rem;color:var(--text-muted);margin-top:0.4rem;padding:0.4rem 0.5rem;border:1px solid var(--border);background:var(--bg);line-height:1.7">
+            <span style="color:var(--accent2);font-weight:bold">// cálculo</span><br>
+            pontos = (crítico × 2) + (alto × 1) + (médio × 0.5)<br>
+            fatias = min(5, arredond(pontos))<br>
+            <br>
+            <span style="color:var(--accent2);font-weight:bold">// fatias → alerta</span><br>
+            ×0 BAIXO &nbsp;·&nbsp; ×1–2 MÉDIO &nbsp;·&nbsp; ×3 ALTO &nbsp;·&nbsp; ×4–5 CRÍTICO<br>
+            <br>
+            <span style="color:var(--accent2);font-weight:bold">// fontes agregadas</span><br>
+            GDACS · WHO · ReliefWeb · IODA · USGS · NOAA · FOREX · DOOMSDAY
+          </div>`
+        : '';
       return `<div class="risk-modal-row${s.last_error ? ' rm-has-error' : ''}">
         <div class="rm-row-top">
           <span class="rm-source">${escHtml(s.source)}</span>
+          ${pizzaHelpBtn}
           <span class="rm-count">${label} · <span class="rm-meta">${when}</span></span>
         </div>
         <div class="rm-desc">${escHtml(s.description)}</div>
+        ${pizzaExplain}
         ${errHtml}
       </div>`;
     }).join('');
