@@ -1056,7 +1056,17 @@
 
       if (_clusterWorker) _clusterWorker.terminate();
       _clusterWorker = new Worker('/embeddings-worker.js', { type: 'module' });
-      _clusterWorker.postMessage({ articles });
+
+      // Heuristic pre-processing: send only the fields the worker needs and cap
+      // description to ~150 chars so the model evaluates title + summary only,
+      // not potentially full article body content.
+      const slimArticles = articles.map(({ guid, title, description, feed_name }) => ({
+        guid,
+        title,
+        description: (description || '').slice(0, 150),
+        feed_name,
+      }));
+      _clusterWorker.postMessage({ articles: slimArticles });
 
       _clusterWorker.onmessage = ({ data: msg }) => {
         if (msg.type === 'status') {
