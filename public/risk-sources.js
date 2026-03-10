@@ -346,11 +346,30 @@ async function fetchForex(proxyBase) {
 const DOOMSDAY_FALLBACK = { current: { year: 2026, seconds: 85 }, previous: { year: 2025, seconds: 89 } };
 
 /**
- * Parse current and previous clock times from doomsdayclock.net HTML.
+ * Parse current and previous clock times from thebulletin.org HTML.
  * Returns { current: {year, seconds}, previous: {year, seconds} } or null.
  */
-function parseDoomsdayClockNet(html) {
-  // Extract all "X seconds to midnight" occurrences (ordered by appearance)
+function parseBulletinOrg(html) {
+  // Try JSON-LD structured data first
+  const jsonLdMatch = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  if (jsonLdMatch) {
+    for (const block of jsonLdMatch) {
+      try {
+        const inner = block.replace(/<script[^>]*>/, '').replace(/<\/script>/, '');
+        const data = JSON.parse(inner);
+        const text = JSON.stringify(data);
+        const m = text.match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+        if (m) {
+          const s = parseInt(m[1], 10);
+          if (s >= 10 && s <= 3600) {
+            return { current: { year: new Date().getFullYear(), seconds: s }, previous: null };
+          }
+        }
+      } catch { /* continue */ }
+    }
+  }
+
+  // Extract all "X seconds to midnight" occurrences in order of appearance
   const allMatches = [...html.matchAll(/(\d+)\s*seconds?\s+to\s+midnight/gi)];
   const times = allMatches
     .map(m => parseInt(m[1], 10))
@@ -358,37 +377,28 @@ function parseDoomsdayClockNet(html) {
 
   if (!times.length) return null;
 
-  const current = times[0];
-
-  // Try to find a year associated with current time
-  const yearNearCurrent = html.match(/(?:current|now|today|(?:20\d{2}))[^<]{0,60}(\d+)\s*seconds?\s+to\s+midnight/i)
-    || html.match(/(\d+)\s*seconds?\s+to\s+midnight[^<]{0,60}(20\d{2})/i);
-
-  // Try to find explicit "previous" or second occurrence
-  const prevSeconds = times.length > 1 ? times[1] : null;
-
-  // Extract years mentioned near the times
-  const yearMatches = [...html.matchAll(/\b(20\d{2})\b/g)].map(m => parseInt(m[1], 10))
-    .filter(y => y >= 2017 && y <= new Date().getFullYear());
-
   const currentYear = new Date().getFullYear();
   const previousYear = currentYear - 1;
 
+  // Second distinct value is likely the previous setting
+  const prevSeconds = times.find(s => s !== times[0]) ?? null;
+
   return {
-    current:  { year: currentYear, seconds: current },
-    previous: prevSeconds
-      ? { year: previousYear, seconds: prevSeconds }
-      : null,
+    current:  { year: currentYear, seconds: times[0] },
+    previous: prevSeconds ? { year: previousYear, seconds: prevSeconds } : null,
   };
 }
 
 async function fetchDoomsday(proxyBase) {
   let result = null;
 
-  // Primary: doomsdayclock.net
+  // Primary: thebulletin.org
   try {
-    const html = await proxyFetch(proxyBase, 'https://www.doomsdayclock.net/').then(r => r.text());
-    result = parseDoomsdayClockNet(html);
+    const html = await proxyFetch(
+      proxyBase,
+      'https://thebulletin.org/doomsday-clock/current-time/'
+    ).then(r => r.text());
+    result = parseBulletinOrg(html);
   } catch { /* try fallback */ }
 
   // Secondary: Wikipedia
@@ -427,7 +437,7 @@ async function fetchDoomsday(proxyBase) {
     description: 'Boletim dos Cientistas Atómicos — avaliação anual do risco existencial global',
     level:       scoreToLevel(score),
     score,
-    url:         'https://www.doomsdayclock.net/',
+    url:         'https://thebulletin.org/doomsday-clock/current-time/',
     location:    'Global',
     event_at:    new Date().toISOString(),
   }];
