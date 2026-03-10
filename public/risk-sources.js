@@ -495,50 +495,6 @@ async function fetchDoomsday(proxyBase) {
   }];
 }
 
-// ── Pizza Index ───────────────────────────────────────────────────────────────
-
-function computePizzaIndex(signals) {
-  const criticoSigs = signals.filter(s => s.score >= 4);
-  const altoSigs    = signals.filter(s => s.score === 3);
-  const medioSigs   = signals.filter(s => s.score === 2);
-
-  const pts    = criticoSigs.length * 2 + altoSigs.length + medioSigs.length * 0.5;
-  const slices = Math.min(5, Math.round(pts));
-
-  const uniqSrcs = sigs => [...new Set(sigs.map(s => s.source))].join(', ');
-
-  // Build detailed source breakdown
-  const parts = [];
-  if (criticoSigs.length) parts.push(`${criticoSigs.length} crítico(s): ${uniqSrcs(criticoSigs)}`);
-  if (altoSigs.length)    parts.push(`${altoSigs.length} alto(s): ${uniqSrcs(altoSigs)}`);
-  if (medioSigs.length)   parts.push(`${medioSigs.length} médio(s): ${uniqSrcs(medioSigs)}`);
-
-  const label =
-    slices === 0 ? '×0 — linha base' :
-    slices === 1 ? '×1 — pré-alerta' :
-    slices === 2 ? '×2 — tensão moderada' :
-    slices === 3 ? '×3 — meia pizza' :
-    slices === 4 ? '×4 — crise activa' :
-                   '×5 — caos total';
-
-  const desc = parts.length ? parts.join(' · ') : 'sem sinais relevantes activos';
-  const score = slices === 0 ? 1 : slices <= 2 ? 2 : slices <= 3 ? 3 : 4;
-  const today = new Date().toISOString().split('T')[0];
-
-  return {
-    guid:        `pizza-${today}`,
-    source:      'PIZZA',
-    category:    'geopolitical',
-    title:       `🍕 Pentagon Pizza Index: ${label}`,
-    description: desc,
-    level:       scoreToLevel(score),
-    score,
-    url:         null,
-    location:    'Global',
-    event_at:    new Date().toISOString(),
-  };
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -569,20 +525,6 @@ export async function fetchRiskSignals(proxyBase) {
         : null,
     });
   });
-
-  // Pizza Index — derived composite (only if at least one dynamic source returned data)
-  if (signals.length > 0) {
-    const pizza = computePizzaIndex(signals);
-    signals.push(pizza);
-    log.push({
-      source:          'PIZZA',
-      category:        'geopolitical',
-      description:     'Pentagon Pizza Index — stress geopolítico composto',
-      signal_count:    1,
-      last_fetched_at: new Date().toISOString(),
-      last_error:      null,
-    });
-  }
 
   return { signals, log };
 }

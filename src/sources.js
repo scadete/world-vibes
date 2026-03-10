@@ -9,7 +9,6 @@ const OSINT_SOURCES = [
   { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
   { source: "FOREX",     category: "economic",      description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
   { source: "DOOMSDAY",  category: "geopolitical",  description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
-  { source: "PIZZA",     category: "geopolitical",  description: "Pentagon Pizza Index — stress geopolítico composto" },
 ];
 
 module.exports = OSINT_SOURCES;
