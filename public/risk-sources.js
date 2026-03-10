@@ -343,30 +343,80 @@ async function fetchForex(proxyBase) {
 
 // ── Doomsday Clock ────────────────────────────────────────────────────────────
 
-const DOOMSDAY_FALLBACK = { current: { year: 2026, seconds: 85 }, previous: { year: 2025, seconds: 89 } };
+// Known announcement dates for fallback (Bulletin of Atomic Scientists, January each year)
+const DOOMSDAY_KNOWN = [
+  { year: 2023, seconds: 90,  date: '2023-01-24' },
+  { year: 2024, seconds: 90,  date: '2024-01-23' },
+  { year: 2025, seconds: 89,  date: '2025-01-28' },
+  { year: 2026, seconds: 85,  date: '2026-01-28' },
+];
+const DOOMSDAY_FALLBACK = {
+  current:  DOOMSDAY_KNOWN[DOOMSDAY_KNOWN.length - 1],
+  previous: DOOMSDAY_KNOWN[DOOMSDAY_KNOWN.length - 2],
+};
+
+/**
+ * Try to extract an ISO date string from bulletin.org HTML.
+ * Checks meta tags, JSON-LD datePublished, <time> elements, and text patterns.
+ */
+function extractBulletinDate(html) {
+  // meta property="article:published_time" or similar
+  const metaM = html.match(/<meta[^>]+(?:article:published_time|article:modified_time|date)[^>]+content=["']([0-9T:Z.+-]{10,})/i)
+             || html.match(/content=["']([0-9]{4}-[0-9]{2}-[0-9]{2})[^"']*["'][^>]+(?:article:published_time|date)/i);
+  if (metaM) {
+    const d = new Date(metaM[1]);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  // JSON-LD datePublished / dateModified
+  const jsonLdBlocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const [, inner] of jsonLdBlocks) {
+    try {
+      const data = JSON.parse(inner);
+      const dp = data.datePublished || data.dateModified || (Array.isArray(data['@graph']) && data['@graph'].find(n => n.datePublished)?.datePublished);
+      if (dp) {
+        const d = new Date(dp);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+      }
+    } catch { /* continue */ }
+  }
+
+  // <time datetime="...">
+  const timeM = html.match(/<time[^>]+datetime=["']([0-9]{4}-[0-9]{2}-[0-9]{2})/i);
+  if (timeM) return timeM[1];
+
+  // Text pattern "January 28, 2026" / "28 January 2026"
+  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const textM = html.match(new RegExp(`(${months})\\s+(\\d{1,2}),?\\s+(20\\d{2})`, 'i'))
+             || html.match(new RegExp(`(\\d{1,2})\\s+(${months}),?\\s+(20\\d{2})`, 'i'));
+  if (textM) {
+    const d = new Date(textM[0]);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  return null;
+}
 
 /**
  * Parse current and previous clock times from thebulletin.org HTML.
- * Returns { current: {year, seconds}, previous: {year, seconds} } or null.
+ * Returns { current: {year, seconds, date?}, previous: {year, seconds, date?} } or null.
  */
 function parseBulletinOrg(html) {
-  // Try JSON-LD structured data first
-  const jsonLdMatch = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-  if (jsonLdMatch) {
-    for (const block of jsonLdMatch) {
-      try {
-        const inner = block.replace(/<script[^>]*>/, '').replace(/<\/script>/, '');
-        const data = JSON.parse(inner);
-        const text = JSON.stringify(data);
-        const m = text.match(/(\d+)\s*seconds?\s+to\s+midnight/i);
-        if (m) {
-          const s = parseInt(m[1], 10);
-          if (s >= 10 && s <= 3600) {
-            return { current: { year: new Date().getFullYear(), seconds: s }, previous: null };
-          }
+  const announcedDate = extractBulletinDate(html);
+
+  // Try JSON-LD for the time value
+  const jsonLdBlocks = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const [, inner] of jsonLdBlocks) {
+    try {
+      const text = JSON.stringify(JSON.parse(inner));
+      const m = text.match(/(\d+)\s*seconds?\s+to\s+midnight/i);
+      if (m) {
+        const s = parseInt(m[1], 10);
+        if (s >= 10 && s <= 3600) {
+          return { current: { year: new Date().getFullYear(), seconds: s, date: announcedDate }, previous: null };
         }
-      } catch { /* continue */ }
-    }
+      }
+    } catch { /* continue */ }
   }
 
   // Extract all "X seconds to midnight" occurrences in order of appearance
@@ -379,12 +429,10 @@ function parseBulletinOrg(html) {
 
   const currentYear = new Date().getFullYear();
   const previousYear = currentYear - 1;
-
-  // Second distinct value is likely the previous setting
   const prevSeconds = times.find(s => s !== times[0]) ?? null;
 
   return {
-    current:  { year: currentYear, seconds: times[0] },
+    current:  { year: currentYear, seconds: times[0], date: announcedDate },
     previous: prevSeconds ? { year: previousYear, seconds: prevSeconds } : null,
   };
 }
@@ -412,7 +460,7 @@ async function fetchDoomsday(proxyBase) {
       if (match) {
         const live = parseInt(match[1], 10);
         if (live >= 10 && live <= 3600) {
-          result = { current: { year: new Date().getFullYear(), seconds: live }, previous: null };
+          result = { current: { year: new Date().getFullYear(), seconds: live, date: null }, previous: null };
         }
       }
     } catch { /* fall back to hardcoded */ }
@@ -429,6 +477,10 @@ async function fetchDoomsday(proxyBase) {
   else if (s > prev.seconds) trend = ` ▲ +${s - prev.seconds}s vs ${prev.year}`;
   else                       trend = ` = sem alteração vs ${prev.year}`;
 
+  // Use the actual announcement date; fall back to known dates table, then January of that year
+  const knownEntry = DOOMSDAY_KNOWN.find(e => e.year === current.year);
+  const announcedDate = current.date || knownEntry?.date || `${current.year}-01-15`;
+
   return [{
     guid:        `doomsday-${current.year}`,
     source:      'DOOMSDAY',
@@ -439,28 +491,37 @@ async function fetchDoomsday(proxyBase) {
     score,
     url:         'https://thebulletin.org/doomsday-clock/current-time/',
     location:    'Global',
-    event_at:    new Date().toISOString(),
+    event_at:    `${announcedDate}T12:00:00Z`,
   }];
 }
 
 // ── Pizza Index ───────────────────────────────────────────────────────────────
 
 function computePizzaIndex(signals) {
-  const criticos = signals.filter(s => s.score >= 4).length;
-  const altos    = signals.filter(s => s.score === 3).length;
-  const medios   = signals.filter(s => s.score === 2).length;
+  const criticoSigs = signals.filter(s => s.score >= 4);
+  const altoSigs    = signals.filter(s => s.score === 3);
+  const medioSigs   = signals.filter(s => s.score === 2);
 
-  const pts    = criticos * 2 + altos + medios * 0.5;
+  const pts    = criticoSigs.length * 2 + altoSigs.length + medioSigs.length * 0.5;
   const slices = Math.min(5, Math.round(pts));
 
-  const [label, desc] =
-    slices === 0 ? ['×0 — linha base',      'sem sinais relevantes activos'] :
-    slices === 1 ? ['×1 — pré-alerta',      `${signals.length} sinal(is) de baixa intensidade`] :
-    slices === 2 ? ['×2 — tensão moderada', `${altos} alerta(s) alto(s), ${medios} médio(s)`] :
-    slices === 3 ? ['×3 — meia pizza',      `${criticos} alerta(s) crítico(s) activo(s)`] :
-    slices === 4 ? ['×4 — crise activa',    'múltiplos alertas críticos — resposta em curso'] :
-                   ['×5 — caos total',      'todos os níveis de alerta activos simultaneamente'];
+  const uniqSrcs = sigs => [...new Set(sigs.map(s => s.source))].join(', ');
 
+  // Build detailed source breakdown
+  const parts = [];
+  if (criticoSigs.length) parts.push(`${criticoSigs.length} crítico(s): ${uniqSrcs(criticoSigs)}`);
+  if (altoSigs.length)    parts.push(`${altoSigs.length} alto(s): ${uniqSrcs(altoSigs)}`);
+  if (medioSigs.length)   parts.push(`${medioSigs.length} médio(s): ${uniqSrcs(medioSigs)}`);
+
+  const label =
+    slices === 0 ? '×0 — linha base' :
+    slices === 1 ? '×1 — pré-alerta' :
+    slices === 2 ? '×2 — tensão moderada' :
+    slices === 3 ? '×3 — meia pizza' :
+    slices === 4 ? '×4 — crise activa' :
+                   '×5 — caos total';
+
+  const desc = parts.length ? parts.join(' · ') : 'sem sinais relevantes activos';
   const score = slices === 0 ? 1 : slices <= 2 ? 2 : slices <= 3 ? 3 : 4;
   const today = new Date().toISOString().split('T')[0];
 
