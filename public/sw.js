@@ -1,4 +1,4 @@
-const CACHE = 'wv-v6';
+const CACHE = 'wv-v7';
 const SHELL = [
   '/',
   '/index.html',
@@ -14,9 +14,7 @@ const SHELL = [
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
+    caches.open(CACHE).then(c => c.addAll(SHELL))
   );
 });
 
