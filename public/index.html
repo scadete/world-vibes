@@ -724,9 +724,9 @@
       }
     } catch (e) {
       el.innerHTML = `<div class="empty"><h2>Erro ao carregar</h2><p>${escHtml(e.message)}</p></div>`;
+    } finally {
+      state.loading = false;
     }
-
-    state.loading = false;
   }
 
   function makeCard(a) {
@@ -1158,11 +1158,11 @@
     } catch (e) {
       toast(`[ erro: ${e.message} ]`);
       bar.classList.remove('visible');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '[↻] Refresh';
+      _fetching = false;
     }
-
-    btn.disabled = false;
-    btn.textContent = '[↻] Refresh';
-    _fetching = false;
   }
 
   async function maybeAutoFetch() {
