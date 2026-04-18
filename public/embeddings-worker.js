@@ -4,14 +4,18 @@
 const SIMILARITY_THRESHOLD = 0.76;
 const IDB_NAME  = 'wv-embeddings';
 const IDB_STORE = 'emb';
-const IDB_VER   = 1;
+const IDB_VER   = 2; // bumped: new model + q8 quantization invalidates old embeddings
 
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 function openDB() {
   return new Promise((res, rej) => {
     const req = indexedDB.open(IDB_NAME, IDB_VER);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (db.objectStoreNames.contains(IDB_STORE)) db.deleteObjectStore(IDB_STORE);
+      db.createObjectStore(IDB_STORE);
+    };
     req.onsuccess = e => res(e.target.result);
     req.onerror   = e => rej(e.target.error);
   });
@@ -53,6 +57,7 @@ self.onmessage = async ({ data: { articles } }) => {
     self.postMessage({ type: 'status', msg: 'A carregar biblioteca…' });
     const { pipeline, env } = await import('/lib/transformers.min.js');
     env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
+    env.backends.onnx.wasm.numThreads = 1; // single-thread avoids SharedArrayBuffer restriction on iOS Safari
 
     self.postMessage({ type: 'status', msg: 'A abrir cache local…' });
     const db = await openDB();
@@ -66,7 +71,7 @@ self.onmessage = async ({ data: { articles } }) => {
           progress: Math.round(info.progress || 0),
         });
       } else if (info.status === 'initiate') {
-        self.postMessage({ type: 'status', msg: 'A inicializar modelo (primeira vez: ~430MB)…' });
+        self.postMessage({ type: 'status', msg: 'A inicializar modelo (primeira vez: ~60MB)…' });
       }
     };
     let pipe;
@@ -74,8 +79,8 @@ self.onmessage = async ({ data: { articles } }) => {
       try {
         pipe = await pipeline(
           'feature-extraction',
-          'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-          { progress_callback: progressCb }
+          'Xenova/multilingual-e5-small',
+          { progress_callback: progressCb, dtype: 'q8' }
         );
         break;
       } catch (modelErr) {
@@ -165,11 +170,17 @@ self.onmessage = async ({ data: { articles } }) => {
     self.postMessage({ type: 'clusters', data: clusters });
 
   } catch (err) {
+    const msg = err.message || '';
     const isModelFetchError = err instanceof SyntaxError ||
-      (err.message && (err.message.includes('JSON') || err.message.includes('Unexpected token')));
-    const friendlyMsg = isModelFetchError
-      ? 'modelo de IA indisponível — verifique sua conexão e tente novamente'
-      : `${err.name}: ${err.message}`;
+      msg.includes('JSON') || msg.includes('Unexpected token');
+    const isOOM = msg.toLowerCase().includes('memory') ||
+      msg.includes('OOM') || msg.includes('allocation failed') ||
+      err instanceof RangeError;
+    const friendlyMsg = isOOM
+      ? 'memória insuficiente — tente recarregar a página ou usar um dispositivo com mais RAM'
+      : isModelFetchError
+        ? 'modelo de IA indisponível — verifique sua conexão e tente novamente'
+        : `${err.name}: ${msg}`;
     self.postMessage({ type: 'error', msg: friendlyMsg });
   }
 };
