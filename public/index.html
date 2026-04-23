@@ -1057,7 +1057,7 @@
     const section = document.getElementById('highlightsSection');
     const list = document.getElementById('highlightsList');
     section.style.display = 'block';
-    list.innerHTML = '<div class="no-highlights">[ a inicializar análise semântica… ]</div>';
+    list.innerHTML = '<div class="no-highlights">[ a agrupar artigos… ]</div>';
 
     try {
       // Load a broader article set for cross-source clustering
@@ -1070,22 +1070,19 @@
       if (_clusterWorker) _clusterWorker.terminate();
       _clusterWorker = new Worker('/embeddings-worker.js', { type: 'module' });
 
-      // Heuristic pre-processing: send only the fields the worker needs and cap
-      // description to ~150 chars so the model evaluates title + summary only,
-      // not potentially full article body content.
-      const slimArticles = articles.map(({ guid, title, description, feed_name }) => ({
+      const slimArticles = articles.map(({ guid, title, description, feed_name, language, link }) => ({
         guid,
         title,
         description: (description || '').slice(0, 150),
         feed_name,
+        language,
+        link,
       }));
       _clusterWorker.postMessage({ articles: slimArticles });
 
       _clusterWorker.onmessage = ({ data: msg }) => {
         if (msg.type === 'status') {
           list.innerHTML = `<div class="no-highlights">[ ${escHtml(msg.msg)} ]</div>`;
-        } else if (msg.type === 'download') {
-          list.innerHTML = `<div class="no-highlights">[ a descarregar modelo: ${msg.progress}% ]</div>`;
         } else if (msg.type === 'progress') {
           list.innerHTML = `<div class="no-highlights">[ a analisar artigos: ${msg.done}/${msg.total} ]</div>`;
         } else if (msg.type === 'related') {
