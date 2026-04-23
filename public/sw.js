@@ -1,4 +1,4 @@
-const CACHE = 'wv-v5';
+const CACHE = 'wv-v6';
 const SHELL = [
   '/',
   '/index.html',
@@ -9,7 +9,6 @@ const SHELL = [
   '/db.js',
   '/fetcher.js',
   '/embeddings-worker.js',
-  '/lib/transformers.min.js',
 ];
 
 self.addEventListener('install', e => {

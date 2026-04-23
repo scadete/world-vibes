@@ -55,7 +55,7 @@ export function parseXML(xmlText, feed) {
     : [...doc.querySelectorAll('channel > item, item')];
 
   return items.map(el => {
-    let link, guid, pubDate, description, content, author;
+    let link, guid, pubDate, description, author;
 
     if (isAtom) {
       link = el.querySelector('link[rel="alternate"]')?.getAttribute('href')
@@ -64,7 +64,6 @@ export function parseXML(xmlText, feed) {
       guid    = getText(el, 'id') || link;
       pubDate = getText(el, 'published') || getText(el, 'updated');
       description = sanitize(getText(el, 'summary') || getText(el, 'content'));
-      content     = sanitize(getText(el, 'content'), 1000);
       author      = getText(el, 'author > name') || getText(el, 'author');
     } else {
       link = getText(el, 'link');
@@ -76,12 +75,6 @@ export function parseXML(xmlText, feed) {
       guid    = getText(el, 'guid') || link;
       pubDate = getText(el, 'pubDate') || getText(el, 'dc\\:date') || getText(el, 'date');
       description = sanitize(getText(el, 'description'));
-      content     = sanitize(
-        getText(el, 'content\\:encoded') ||
-        getText(el, 'encoded') ||
-        description,
-        1000
-      );
       author = getText(el, 'dc\\:creator') || getText(el, 'creator') || getText(el, 'author');
     }
 
@@ -90,7 +83,6 @@ export function parseXML(xmlText, feed) {
       title:       getText(el, 'title'),
       link:        link || null,
       description: description || '',
-      content:     content || '',
       pub_date:    safeDate(pubDate),
       author:      author || '',
       feed_name:   feed.name,
