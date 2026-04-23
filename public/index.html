@@ -1020,6 +1020,7 @@
   // ── Clusters — client-side via Web Worker + Transformers.js ─────────────────
 
   let _clusterWorker = null;
+  window.addEventListener('pagehide', () => { _clusterWorker?.terminate(); _clusterWorker = null; });
 
   function renderClusters(data) {
     const list = document.getElementById('highlightsList');
@@ -1091,6 +1092,8 @@
           _relatedMap = new Map(Object.entries(msg.data));
         } else if (msg.type === 'clusters') {
           renderClusters(msg.data);
+          _clusterWorker.terminate();
+          _clusterWorker = null;
         } else if (msg.type === 'error') {
           list.innerHTML = `<div class="no-highlights">[ erro: ${escHtml(msg.msg)} ] <button id="retryHighlights" style="margin-left:8px;cursor:pointer;background:none;border:1px solid currentColor;padding:2px 6px;border-radius:3px;font-size:inherit">↺ tentar novamente</button></div>`;
           document.getElementById('retryHighlights')?.addEventListener('click', loadClusters);
@@ -1206,18 +1209,19 @@
   // ── Init — open DB, prune old data, load UI, auto-fetch if stale ─────────────
   (async () => {
     await openDB();
-    await Promise.all([pruneOld(7), pruneRiskSignals(5)]);
+    await Promise.all([pruneOld(3), pruneRiskSignals(5)]);
     showSkeletons();
     await Promise.all([
       loadArticles(),
       loadCategories(),
       loadStats(),
       loadTrending(),
-      loadClusters(),
       loadRiskSignals(),
     ]);
     maybeAutoFetch();
     maybeAutoFetchRisk();
+    // Delay ML worker startup so it doesn't compete with initial network + IDB work
+    setTimeout(loadClusters, 5000);
   })();
 
   // ── PWA — apple-touch-icon via canvas (iOS) ──────────────────────────────
