@@ -617,17 +617,26 @@
   const APP_VERSION = '2.0.0';
 
   const PAGE_SIZE = 48;
+  // Default to the lightweight "hashed" clustering on iOS — the transformer
+  // model (~60MB WASM) is what crashes mobile Safari with a page reload.
+  const _isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   // Restore persisted filters
   const _savedState = JSON.parse(localStorage.getItem('wv-state') || '{}');
   let state = {
     category: _savedState.category || 'all',
     language: _savedState.language || 'all',
+    clusterMethod: _savedState.clusterMethod || (_isiOS ? 'hashed' : 'transformer'),
     search: '', cluster: null, offset: 0, loading: false
   };
   let _relatedMap = new Map();
 
   function persistState() {
-    localStorage.setItem('wv-state', JSON.stringify({ category: state.category, language: state.language }));
+    localStorage.setItem('wv-state', JSON.stringify({
+      category: state.category,
+      language: state.language,
+      clusterMethod: state.clusterMethod,
+    }));
   }
 
   // ── Utils ───────────────────────────────────────────────────────────────────
@@ -933,6 +942,11 @@
     document.getElementById('feedsModalOverlay').classList.remove('open');
   }
   function openConfigModal() {
+    const opts = [
+      ['transformer', 'Smart  (modelo neural ~60MB)'],
+      ['hashed',      'Rapido (hash de palavras)'],
+      ['dictionary',  'Dicionario multilingue'],
+    ].map(([v, label]) => `<option value="${v}"${state.clusterMethod === v ? ' selected' : ''}>${label}</option>`).join('');
     document.getElementById('configModalBody').innerHTML = `
       <div class="risk-modal-row">
         <span class="rm-source">app version</span>
@@ -953,8 +967,17 @@
       <div class="risk-modal-row">
         <span class="rm-source">refresh interval</span>
         <span class="rm-count">${FETCH_INTERVAL / 60000} min</span>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">analise de destaques</span>
+        <select id="clusterMethodSelect" style="background:transparent;color:inherit;border:1px solid currentColor;padding:2px 4px;font:inherit">${opts}</select>
       </div>`;
     document.getElementById('configModalOverlay').classList.add('open');
+    document.getElementById('clusterMethodSelect').addEventListener('change', e => {
+      state.clusterMethod = e.target.value;
+      persistState();
+      loadClusters();
+    });
   }
   function closeConfigModal() {
     document.getElementById('configModalOverlay').classList.remove('open');
@@ -1090,16 +1113,22 @@
       }
 
       if (_clusterWorker) _clusterWorker.terminate();
-      _clusterWorker = new Worker('/embeddings-worker.js', { type: 'module' });
+      const workerUrl =
+        state.clusterMethod === 'hashed'     ? '/cluster-hashed-worker.js' :
+        state.clusterMethod === 'dictionary' ? '/cluster-dictionary-worker.js' :
+                                               '/embeddings-worker.js';
+      _clusterWorker = new Worker(workerUrl, { type: 'module' });
 
       // Heuristic pre-processing: send only the fields the worker needs and cap
       // description to ~150 chars so the model evaluates title + summary only,
       // not potentially full article body content.
-      const slimArticles = articles.map(({ guid, title, description, feed_name }) => ({
+      const slimArticles = articles.map(({ guid, title, description, feed_name, language, link }) => ({
         guid,
         title,
         description: (description || '').slice(0, 150),
         feed_name,
+        language,
+        link,
       }));
       _clusterWorker.postMessage({ articles: slimArticles });
 
