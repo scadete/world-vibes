@@ -614,6 +614,7 @@
   const PROXY = typeof WV_PROXY !== 'undefined' ? WV_PROXY
     : 'http://localhost:8787/proxy';
   const FETCH_INTERVAL = 30 * 60 * 1000; // 30 min
+  const APP_VERSION = '2.0.0';
 
   const PAGE_SIZE = 48;
   // Restore persisted filters
@@ -932,6 +933,27 @@
     document.getElementById('feedsModalOverlay').classList.remove('open');
   }
   function openConfigModal() {
+    document.getElementById('configModalBody').innerHTML = `
+      <div class="risk-modal-row">
+        <span class="rm-source">app version</span>
+        <span class="rm-count">v${APP_VERSION}</span>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">db version</span>
+        <span class="rm-count">v1</span>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">feeds configured</span>
+        <span class="rm-count">${FEEDS.length}</span>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">osint sources</span>
+        <span class="rm-count">${Object.keys(SOURCE_META).length}</span>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">refresh interval</span>
+        <span class="rm-count">${FETCH_INTERVAL / 60000} min</span>
+      </div>`;
     document.getElementById('configModalOverlay').classList.add('open');
   }
   function closeConfigModal() {
@@ -1289,7 +1311,7 @@
 <div class="risk-modal-overlay" id="configModalOverlay" onclick="closeConfigModal()">
   <div class="risk-modal" onclick="event.stopPropagation()">
     <div class="risk-modal-header">╔══ CONFIGURATION ════════════════════════════════════════╗</div>
-    <div class="risk-modal-body" style="text-align:center; padding: 1.5rem 0; color: var(--text-muted);">soon</div>
+    <div class="risk-modal-body" id="configModalBody"></div>
     <button class="risk-modal-footer" onclick="closeConfigModal()" title="Close">╚══ [×] close ═══════════════════════════════════════════╝</button>
   </div>
 </div>
