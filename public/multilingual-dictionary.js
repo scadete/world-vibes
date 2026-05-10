@@ -138,13 +138,16 @@ export const STOPWORDS = {
     'it','its','he','she','they','we','you','said','says','new','one','two',
     'may','also','after','before','about','more','over','up','out','into',
     'who','what','when','where','why','how','than','then','so','if','no',
+    'comments','comment',
   ]),
   pt: new Set([
     'o','a','os','as','um','uma','uns','umas','de','do','da','dos','das',
     'em','no','na','nos','nas','por','para','com','ao','aos',
     'que','se','nao','e','foi','sao','esta','ser','ter','ou','mas',
     'mais','ja','ele','ela','eles','elas','seu','sua','seus','suas',
-    'como','anos','apos','pela','pelo','feira','leia','clique','veja',
+    'como','anos','apos','pela','pelo','feira','leia','clique','veja','aqui',
+    'segunda','terca','quarta','quinta','sexta','sabado','domingo',
+    'hoje','ontem','amanha','noticia','noticias','comentarios',
   ]),
   es: new Set([
     'el','la','los','las','un','una','del','al','con','por','para','que',

@@ -255,6 +255,8 @@ export async function getTrending(hours = 24) {
   const db = await openDB();
   const cutoff = new Date(Date.now() - hours * 3600 * 1000).toISOString();
 
+  // Tokens are NFD-stripped of accents before this check, so entries here
+  // must be accent-free to match.
   const STOPWORDS = new Set([
     // EN
     'the','a','an','and','or','but','in','on','at','to','for','of','with',
@@ -262,15 +264,18 @@ export async function getTrending(hours = 24) {
     'can','could','do','does','did','not','by','as','from','this','that',
     'it','its','he','she','they','we','you','said','says','new','one','two',
     'may','also','after','before','about','more','over','up','out','into',
+    'comments','comment',
     // PT
     'o','a','os','as','um','uma','uns','umas','de','do','da','dos','das',
-    'em','no','na','nos','nas','por','para','com','ao','à','aos','às',
-    'que','se','não','é','foi','são','está','ser','ter','e','ou','mas',
-    'mais','já','ele','ela','eles','elas','seu','sua','seus','suas',
-    'como','anos','apos','pela','feira','leia','segunda','clique','veja',
+    'em','no','na','nos','nas','por','para','com','ao','aos',
+    'que','se','nao','foi','sao','esta','ser','ter','e','ou','mas',
+    'mais','ja','ele','ela','eles','elas','seu','sua','seus','suas',
+    'como','anos','apos','pela','feira','leia','clique','veja','aqui',
+    'segunda','terca','quarta','quinta','sexta','sabado','domingo',
+    'hoje','ontem','amanha','noticia','noticias','comentarios',
     // ES
     'el','la','los','las','un','una','del','al','con','por','para','que',
-    'en','no','es','son','fue','han','una','está','se','su','sus',
+    'en','no','es','son','fue','han','una','esta','se','su','sus',
   ]);
 
   return new Promise((resolve, reject) => {
