@@ -27,6 +27,24 @@
       --font:       'Courier New', 'Lucida Console', monospace;
     }
 
+    /* ── Font color themes (selectable in settings) ── */
+    :root[data-theme="amber"] {
+      --border:     #3a280a;
+      --accent:     #ffb000;
+      --accent2:    #cc8400;
+      --text:       #ffc233;
+      --text-muted: #7a5a1a;
+      --success:    #ffb000;
+    }
+    :root[data-theme="white"] {
+      --border:     #333333;
+      --accent:     #ffffff;
+      --accent2:    #b0b0b0;
+      --text:       #e6e6e6;
+      --text-muted: #6e6e6e;
+      --success:    #ffffff;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -627,15 +645,33 @@
     category: _savedState.category || 'all',
     language: _savedState.language || 'all',
     clusterMethod: _savedState.clusterMethod || (_isiOS ? 'hashed' : 'transformer'),
+    theme: _savedState.theme || 'green',
     search: '', cluster: null, offset: 0, loading: false
   };
   let _relatedMap = new Map();
+
+  // Available font color themes (label shown in settings)
+  const THEMES = [
+    ['green', 'Verde'],
+    ['amber', 'Ambar'],
+    ['white', 'Branco'],
+  ];
+  function applyTheme(theme) {
+    // "green" is the default palette defined in :root — no attribute needed
+    if (theme && theme !== 'green') {
+      document.documentElement.setAttribute('data-theme', theme);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
+  applyTheme(state.theme);
 
   function persistState() {
     localStorage.setItem('wv-state', JSON.stringify({
       category: state.category,
       language: state.language,
       clusterMethod: state.clusterMethod,
+      theme: state.theme,
     }));
   }
 
@@ -947,6 +983,8 @@
       ['hashed',      'Rapido (hash de palavras)'],
       ['dictionary',  'Dicionario multilingue'],
     ].map(([v, label]) => `<option value="${v}"${state.clusterMethod === v ? ' selected' : ''}>${label}</option>`).join('');
+    const themeOpts = THEMES
+      .map(([v, label]) => `<option value="${v}"${state.theme === v ? ' selected' : ''}>${label}</option>`).join('');
     document.getElementById('configModalBody').innerHTML = `
       <div class="risk-modal-row">
         <span class="rm-source">app version</span>
@@ -971,12 +1009,21 @@
       <div class="risk-modal-row">
         <span class="rm-source">analise de destaques</span>
         <select id="clusterMethodSelect" style="background:transparent;color:inherit;border:1px solid currentColor;padding:2px 4px;font:inherit">${opts}</select>
+      </div>
+      <div class="risk-modal-row">
+        <span class="rm-source">cor da fonte</span>
+        <select id="themeSelect" style="background:transparent;color:inherit;border:1px solid currentColor;padding:2px 4px;font:inherit">${themeOpts}</select>
       </div>`;
     document.getElementById('configModalOverlay').classList.add('open');
     document.getElementById('clusterMethodSelect').addEventListener('change', e => {
       state.clusterMethod = e.target.value;
       persistState();
       loadClusters();
+    });
+    document.getElementById('themeSelect').addEventListener('change', e => {
+      state.theme = e.target.value;
+      applyTheme(state.theme);
+      persistState();
     });
   }
   function closeConfigModal() {
