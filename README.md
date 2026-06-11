@@ -129,5 +129,3 @@ Adicionar o domínio à allowlist em `worker/index.js` (`ALLOWED_DOMAINS`).
 | USGS | Actividade sísmica | GeoJSON |
 | NOAA/SWPC | Clima espacial | JSON |
 | Frankfurter | Stress cambial (USD) | REST API |
-| Wikipedia | Relógio do Apocalipse | REST API |
-| Pizza Index | Stress geopolítico composto | Derivado |

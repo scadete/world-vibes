@@ -60,11 +60,9 @@ must be assigned a **severity level on a 1–4 scale**:
 | USGS | GeoJSON | Seismic activity — earthquakes M≥2.5 in last 24 h |
 | NOAA/SWPC | JSON | Space weather — geomagnetic storms (Kp index) |
 | Frankfurter | REST API (JSON) | Foreign exchange stress (currency volatility vs USD) |
-| Bulletin of the Atomic Scientists | HTML scrape | Doomsday Clock (minutes to midnight) |
 
 - All OSINT fetches must use `Promise.allSettled` so a single failing source does not block others
 - Each individual fetch must timeout after **15 seconds**
-- The Doomsday Clock fetch must fall back to Wikipedia, and then to a hardcoded value if both fail
 
 ### 3. Semantic Clustering
 
