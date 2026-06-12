@@ -8,7 +8,6 @@ const OSINT_SOURCES = [
   { source: "USGS",      category: "seismic",       description: "Actividade sísmica (USGS)" },
   { source: "NOAA",      category: "space",         description: "Clima espacial (NOAA/SWPC)" },
   { source: "FOREX",     category: "economic",      description: "Stress cambial — moedas vs USD (BCE/Frankfurter)" },
-  { source: "DOOMSDAY",  category: "geopolitical",  description: "Relógio do Apocalipse (Boletim dos Cientistas Atómicos)" },
 ];
 
 module.exports = OSINT_SOURCES;

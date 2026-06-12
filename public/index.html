@@ -1056,6 +1056,26 @@
   const RISK_PAGE_SIZE = 5;
   let _riskSignals = [];
 
+  /** True if any ALTO/CRÍTICO signal occurred in the last 24h */
+  function hasRecentHighAlert(signals) {
+    const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    return signals.some(s => s.score >= 3 && s.event_at >= cutoff);
+  }
+
+  function renderRiskCollapsed(signals, lastFetch) {
+    const list = document.getElementById('riskList');
+    const since = lastFetch ? relativeTime(lastFetch) : '—';
+    list.innerHTML = `
+      <div class="risk-empty">[ fontes OSINT consultadas ${escHtml(since)} — nenhum alerta de nível ALTO ou superior nas últimas 24h ]</div>`;
+    if (signals.length) {
+      const btn = document.createElement('button');
+      btn.className = 'risk-more-btn';
+      btn.textContent = signals.length === 1 ? '[ ver 1 alerta ]' : `[ ver ${signals.length} alertas ]`;
+      btn.onclick = () => renderRiskSignals(signals, RISK_PAGE_SIZE);
+      list.appendChild(btn);
+    }
+  }
+
   function renderRiskSignals(signals, limit) {
     const list = document.getElementById('riskList');
     list.innerHTML = '';
@@ -1099,6 +1119,11 @@
         list.innerHTML = `
           <div class="risk-empty">[ nenhum sinal detectado ]</div>
           <div class="risk-empty" style="margin-top:0.2rem">fontes consultadas ${since}: ${escHtml(sourceNames)}</div>`;
+        return;
+      }
+
+      if (!hasRecentHighAlert(signals)) {
+        renderRiskCollapsed(signals, lastFetch);
         return;
       }
 
