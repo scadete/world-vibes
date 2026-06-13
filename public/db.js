@@ -264,18 +264,27 @@ export async function getTrending(hours = 24) {
     'can','could','do','does','did','not','by','as','from','this','that',
     'it','its','he','she','they','we','you','said','says','new','one','two',
     'may','also','after','before','about','more','over','up','out','into',
-    'comments','comment',
+    'who','what','when','where','why','how','than','then','so','if','no',
+    'comments','comment','continue','reading','read',
     // PT
     'o','a','os','as','um','uma','uns','umas','de','do','da','dos','das',
     'em','no','na','nos','nas','por','para','com','ao','aos',
     'que','se','nao','foi','sao','esta','ser','ter','e','ou','mas',
     'mais','ja','ele','ela','eles','elas','seu','sua','seus','suas',
-    'como','anos','apos','pela','feira','leia','clique','veja','aqui',
+    'pelo','pelos','pela','pelas','sobre','segundo','entre','contra','ate',
+    'este','estes','estas','esse','essa','esses','essas','isso','isto',
+    'neste','nesta','nestes','nestas','nesse','nessa','nesses','nessas',
+    'deste','desta','desse','dessa',
+    'ainda','quando','onde','entao','tambem','depois','antes','durante',
+    'como','anos','ano','dia','dias','semana','apos','feira',
+    'leia','clique','veja','aqui',
     'segunda','terca','quarta','quinta','sexta','sabado','domingo',
     'hoje','ontem','amanha','noticia','noticias','comentarios',
     // ES
     'el','la','los','las','un','una','del','al','con','por','para','que',
-    'en','no','es','son','fue','han','una','esta','se','su','sus',
+    'en','no','es','son','fue','han','esta','se','su','sus','y','o',
+    'pero','mas','muy','como','este','estos','estas','tambien',
+    'sobre','segun','entre','contra',
   ]);
 
   return new Promise((resolve, reject) => {
